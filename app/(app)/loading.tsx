@@ -1,18 +1,22 @@
 export default function Loading() {
   return (
     <div aria-busy="true" aria-label="Loading">
-      <div className="topbar">
-        <div className="skeleton" style={{ width: 120, height: 30, borderRadius: 10 }} />
-        <div className="skeleton" style={{ width: 110, height: 40, borderRadius: 999 }} />
+      <div className="top">
+        <div className="skeleton" style={{ width: 260, height: 16, borderRadius: 4 }} />
       </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-        <div className="skeleton" style={{ width: 110, height: 26, borderRadius: 999 }} />
-        <div className="skeleton" style={{ width: 140, height: 26, borderRadius: 999 }} />
-      </div>
-      <div className="skeleton" style={{ height: 190, marginBottom: 14 }} />
-      <div className="stack">
-        <div className="skeleton" style={{ height: 240 }} />
-        <div className="skeleton" style={{ height: 160 }} />
+      <div className="content">
+        <div className="page">
+          <div className="page-main">
+            <div className="skeleton" style={{ width: 160, height: 12, borderRadius: 4 }} />
+            <div className="skeleton" style={{ width: '60%', height: 32, borderRadius: 6 }} />
+            <div className="skeleton" style={{ height: 180 }} />
+            <div className="skeleton" style={{ height: 240 }} />
+          </div>
+          <div className="page-side">
+            <div className="skeleton" style={{ height: 320 }} />
+            <div className="skeleton" style={{ height: 160 }} />
+          </div>
+        </div>
       </div>
     </div>
   );

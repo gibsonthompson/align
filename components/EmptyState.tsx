@@ -4,23 +4,23 @@ export default function EmptyState({
   Icon,
   title,
   body,
-  small = false,
+  big = false,
   children,
 }: {
   Icon: LucideIcon;
   title: string;
   body: string;
-  small?: boolean;
+  big?: boolean;
   children?: React.ReactNode;
 }) {
   return (
-    <div className={`empty${small ? ' small' : ''}`}>
+    <div className={`empty${big ? ' big' : ''}`}>
       <div className="empty-icon">
-        <Icon size={small ? 22 : 26} strokeWidth={2.3} />
+        <Icon size={big ? 18 : 15} strokeWidth={2} />
       </div>
       <div>
         <h3>{title}</h3>
-        <p style={{ marginTop: 4 }}>{body}</p>
+        <p>{body}</p>
         {children}
       </div>
     </div>

@@ -31,13 +31,13 @@ export default function AreasSection({ sector, areas }: { sector: Sector; areas:
   }
 
   return (
-    <section className="card" style={{ ['--c' as string]: sector.colour }}>
-      <div className="section-head">
-        <h2 className="section-title">
+    <section className="panel" style={{ ['--c' as string]: sector.colour }}>
+      <div className="panel-head">
+        <h2 className="panel-title">
           Areas
           <span className="count">{areas.length}</span>
         </h2>
-        <button type="button" className={`text-btn${adding ? '' : ' ghost'}`} onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
+        <button type="button" className={`btn${adding ? '' : ' ghost'}`} onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
           {adding ? 'Cancel' : (
             <>
               <Plus size={15} strokeWidth={2.8} /> Add Area
@@ -45,18 +45,19 @@ export default function AreasSection({ sector, areas }: { sector: Sector; areas:
           )}
         </button>
       </div>
+      <div className="panel-body">
       {areas.length > 0 && (
         <div className="bal">
           {areas.map((a) => (
             <Link key={a.id} href={`/s/${a.slug}`} className="tile">
-              <i className="dot" aria-hidden />
+              <i className="swatch" aria-hidden />
               <span className="name">{a.name}</span>
               <span className="n">{a.pages}</span>
             </Link>
           ))}
         </div>
       )}
-      {areas.length === 0 && !adding && <p className="muted" style={{ fontSize: 14 }}>No areas yet. Add one to split this sector up.</p>}
+      {areas.length === 0 && !adding && <p className="dim" style={{ fontSize: 13 }}>No areas yet. Add one to split this sector up.</p>}
       {adding && (
         <form
           style={{ display: 'flex', gap: 8, marginTop: areas.length ? 12 : 0 }}
@@ -67,7 +68,6 @@ export default function AreasSection({ sector, areas }: { sector: Sector; areas:
         >
           <input
             className="input"
-            style={{ height: 46 }}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Name the area"
@@ -75,7 +75,7 @@ export default function AreasSection({ sector, areas }: { sector: Sector; areas:
             maxLength={80}
             autoFocus
           />
-          <button type="submit" className="btn primary small" disabled={saving || !name.trim()}>
+          <button type="submit" className="btn primary" disabled={saving || !name.trim()}>
             {saving && <Loader2 size={16} className="spin" />} Add
           </button>
         </form>
@@ -85,6 +85,7 @@ export default function AreasSection({ sector, areas }: { sector: Sector; areas:
           {error}
         </div>
       )}
+      </div>
     </section>
   );
 }

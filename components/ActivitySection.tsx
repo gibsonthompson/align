@@ -99,15 +99,15 @@ function describe(r: Row): { text: React.ReactNode; tone: 'plain' | 'strong' | '
 // Every change, completion and connection on this page, newest first.
 export default function ActivitySection({ rows }: { rows: Row[] }) {
   return (
-    <section className="card flush">
-      <div className="section-head">
-        <h2 className="section-title">
+    <section className="panel">
+      <div className="panel-head">
+        <h2 className="panel-title">
           History
           <span className="count">{rows.length}</span>
         </h2>
       </div>
       {rows.length === 0 ? (
-        <EmptyState small Icon={History} title="No History Yet" body="Changes, completions and links show up here as they happen." />
+        <EmptyState Icon={History} title="No History Yet" body="Changes, completions and links show up here as they happen." />
       ) : (
         <div className="timeline">
           {rows.map((r) => {

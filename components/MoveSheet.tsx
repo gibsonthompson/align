@@ -94,13 +94,13 @@ export default function MoveSheet({
       {mode === 'page' ? (
         <>
           <div className="field" style={{ position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 14, top: 15, color: 'var(--text-3)' }}>
-              {loading ? <Loader2 size={19} className="spin" /> : <Search size={19} />}
+            <span style={{ position: 'absolute', left: 10, top: 9, color: 'var(--text-3)' }}>
+              {loading ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
             </span>
             <input
               data-autofocus
               className="input"
-              style={{ paddingLeft: 44 }}
+              style={{ paddingLeft: 34 }}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Find the new parent page"
@@ -108,7 +108,7 @@ export default function MoveSheet({
               autoComplete="off"
             />
           </div>
-          <div className="card flush">
+          <div className="panel">
             {items.length === 0 && !loading ? (
               <div className="switcher-empty">{q ? 'Nothing matches that yet.' : 'Start typing to find a page.'}</div>
             ) : (
@@ -126,7 +126,7 @@ export default function MoveSheet({
             <span className="field-label">Sector Or Area</span>
             <Dropdown label="Sector" value={sectorId} options={sectorOptions} onChange={setSectorId} placeholder="Choose a sector" />
           </div>
-          <button type="button" className="btn primary block" disabled={!sectorId || saving} onClick={() => go({ sectorId })}>
+          <button type="button" className="btn primary block lg" disabled={!sectorId || saving} onClick={() => go({ sectorId })}>
             {saving && <Loader2 size={17} className="spin" />} Move Here
           </button>
         </>

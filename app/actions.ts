@@ -11,7 +11,8 @@ import { createSession, SESSION_COOKIE, sessionCookieOptions } from '@/lib/sessi
 import { cleanBody, cleanText, isId, slugify } from '@/lib/ids';
 import { isISODate } from '@/lib/format';
 import { NODE_KINDS, SECTOR_ICON_NAMES } from '@/lib/kinds';
-import type { ActionResult, NodeStatus, NodeType, ObjectRef, ObjectType, Relation } from '@/lib/types';
+import type { ActionResult, AlignNode, BrainMessage, BrainProposal, BrainReply, NodeStatus, NodeType, ObjectRef, ObjectType, Relation, Sector } from '@/lib/types';
+import { BrainError, brainModel, nextTypes, runBrain, type BrainTarget } from '@/lib/brain';
 
 const NODE_TYPES = Object.keys(NODE_KINDS) as NodeType[];
 const STATUSES: NodeStatus[] = ['inbox', 'planned', 'active', 'done', 'paused', 'abandoned'];
@@ -143,11 +144,26 @@ export async function updateNode(
     priority?: number | null;
     start_date?: string | null;
     due_date?: string | null;
+    done_criteria?: string;
+    effort_minutes?: number | null;
+    cadence?: string;
+    actionable?: boolean;
   },
 ): Promise<ActionResult> {
   if (!(await hasSession())) return err(SIGNED_OUT);
   if (!isId(id)) return err('That page no longer exists.');
   const row: Record<string, unknown> = {};
+  if (patch.done_criteria !== undefined) row.done_criteria = cleanBody(patch.done_criteria, 600);
+  if (patch.cadence !== undefined) row.cadence = cleanText(patch.cadence, 120);
+  if (patch.effort_minutes !== undefined) {
+    if (patch.effort_minutes !== null && !(Number.isInteger(patch.effort_minutes) && patch.effort_minutes > 0 && patch.effort_minutes <= 100000))
+      return err('Effort is a number of minutes.');
+    row.effort_minutes = patch.effort_minutes;
+  }
+  if (patch.actionable !== undefined) {
+    row.actionable = Boolean(patch.actionable);
+    if (patch.actionable) row.brain_state = 'actionable';
+  }
   if (patch.title !== undefined) {
     const t = cleanText(patch.title, 300);
     if (!t) return err('The title cannot be empty.');
@@ -417,4 +433,209 @@ export async function findObjects(query: string, types?: string[]): Promise<Acti
   const { data, error } = await db().rpc('align_search', { p_q: q, p_limit: 24, p_types: t?.length ? t : null });
   if (error) return err('Search is not working right now. Try again.');
   return { ok: true, data: (data ?? []) as ObjectRef[] };
+}
+
+// ---------------------------------------------------------------------------
+// The brain
+// ---------------------------------------------------------------------------
+
+const SECTOR_COLS =
+  'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at';
+const NODE_COLS =
+  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state';
+
+async function loadTarget(type: ObjectType, id: string): Promise<BrainTarget | null> {
+  const { data: sectors } = await db().from('align_sectors').select(SECTOR_COLS);
+  const all = (sectors ?? []) as Sector[];
+  const top = (sid: string | null) => {
+    let s = all.find((x) => x.id === sid) ?? null;
+    let g = 0;
+    while (s?.parent_id && g++ < 16) s = all.find((x) => x.id === s!.parent_id) ?? s;
+    return s;
+  };
+  if (type === 'sector') {
+    const s = all.find((x) => x.id === id);
+    if (!s) return null;
+    return { objectType: 'sector', id, sector: s, topSector: top(s.id), node: null };
+  }
+  const { data: node } = await db().from('align_nodes').select(NODE_COLS).eq('id', id).maybeSingle();
+  if (!node) return null;
+  const n = node as AlignNode;
+  return { objectType: 'node', id, sector: all.find((x) => x.id === n.sector_id) ?? null, topSector: top(n.sector_id), node: n };
+}
+
+// One turn: optional answers and a message from Gibson, then the brain's reply.
+export async function brainRun(
+  type: string,
+  id: string,
+  input: { answers?: { question: string; answer: string }[]; message?: string },
+): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!OBJECT_TYPES.includes(type as ObjectType) || !isId(id)) return err('That page no longer exists.');
+  const target = await loadTarget(type as ObjectType, id);
+  if (!target) return err('That page no longer exists.');
+  if (target.node?.archived) return err('This page is archived. Restore it first.');
+
+  const answers = (input.answers ?? [])
+    .map((a) => ({ question: cleanText(a.question, 400), answer: cleanBody(a.answer, 2000) }))
+    .filter((a) => a.question && a.answer)
+    .slice(0, 6);
+  const message = cleanBody(input.message ?? '', 4000);
+
+  const { data: prior } = await db()
+    .from('align_brain_messages')
+    .select('id, role, content, data, created_at')
+    .eq('object_type', type)
+    .eq('object_id', id)
+    .order('created_at')
+    .limit(60);
+  const history = (prior ?? []) as BrainMessage[];
+
+  let userTurn = '';
+  if (answers.length) userTurn += `My answers:\n${answers.map((a) => `- ${a.question}\n  ${a.answer}`).join('\n')}\n\n`;
+  if (message) userTurn += `${message}\n\n`;
+  if (!userTurn) {
+    userTurn = history.length
+      ? 'Look at this page again with everything above and decide the next step: ask what you still need, or propose the next layer.'
+      : target.node && ['action', 'task'].includes(target.node.type)
+        ? 'Check whether this page passes the actionable test. If it does not, ask what you need or propose the more specific pages under it.'
+        : 'Break this page down. Ask what you need to know first, or propose the next layer.';
+  }
+  userTurn = userTurn.trim();
+
+  // Record what Gibson said before calling, so nothing he typed is lost if the call fails.
+  if (answers.length || message) {
+    await db().from('align_brain_messages').insert({ object_type: type, object_id: id, role: 'user', content: userTurn, data: answers.length ? { answers } : {} });
+  }
+
+  let reply: BrainReply;
+  try {
+    reply = await runBrain(target, history, userTurn);
+  } catch (e) {
+    return err(e instanceof BrainError ? e.message : 'The brain hit a problem. Try again.');
+  }
+
+  // Close out older open proposals: the newest turn is the one that counts.
+  const openOld = history.filter((m) => m.role === 'brain' && !(m.data as BrainReply & { closed?: boolean }).closed);
+  for (const m of openOld) {
+    await db().from('align_brain_messages').update({ data: { ...(m.data as object), closed: true } }).eq('id', m.id);
+  }
+
+  const { error } = await db()
+    .from('align_brain_messages')
+    .insert({ object_type: type, object_id: id, role: 'brain', content: reply.assessment, data: reply, model: brainModel() });
+  if (error) return err('The brain answered but it could not be saved. Try again.');
+
+  // Learn durable facts, skipping ones already known.
+  if (reply.facts_learned.length) {
+    const { data: known } = await db().from('align_facts').select('fact').eq('archived', false).limit(500);
+    const have = new Set(((known ?? []) as { fact: string }[]).map((f) => f.fact.toLowerCase().trim()));
+    const rows = reply.facts_learned
+      .filter((f) => !have.has(f.toLowerCase().trim()))
+      .map((fact) => ({ fact, sector_id: target.topSector?.id ?? null, source: 'brain' }));
+    if (rows.length) await db().from('align_facts').insert(rows);
+  }
+
+  if (target.node) {
+    const state = reply.actionable ? 'actionable' : reply.questions.length ? 'asking' : reply.proposals.length ? 'proposed' : target.node.brain_state;
+    await db().from('align_nodes').update({ brain_state: state, actionable: reply.actionable }).eq('id', id);
+  }
+  refresh();
+  return { ok: true };
+}
+
+// Turns the chosen proposals into real pages under this one.
+export async function brainAccept(
+  messageId: string,
+  picks: { index: number; title: string; done_criteria: string; effort_minutes: number | null; cadence: string }[],
+): Promise<ActionResult<{ created: { id: string; title: string }[] }>> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(messageId)) return err('That suggestion is gone. Run the brain again.');
+  const { data: msg } = await db().from('align_brain_messages').select('id, object_type, object_id, role, data').eq('id', messageId).maybeSingle();
+  if (!msg || msg.role !== 'brain') return err('That suggestion is gone. Run the brain again.');
+  const reply = msg.data as BrainReply & { closed?: boolean };
+  const proposals = [...(reply.proposals ?? [])];
+  const target = await loadTarget(msg.object_type as ObjectType, msg.object_id as string);
+  if (!target) return err('That page no longer exists.');
+  const allowed = nextTypes(target.objectType, target.node?.type);
+
+  const chosen = picks.filter((p) => Number.isInteger(p.index) && proposals[p.index] && proposals[p.index].status !== 'added');
+  if (!chosen.length) return err('Pick at least one to add.');
+
+  // New pages go after what is already there.
+  let q = db().from('align_nodes').select('sort').eq('archived', false).order('sort', { ascending: false }).limit(1);
+  q = target.node ? q.eq('parent_id', target.id) : q.is('parent_id', null).eq('sector_id', target.id);
+  const { data: last } = await q;
+  let sort = Number(last?.[0]?.sort ?? 0);
+
+  const created: { id: string; title: string }[] = [];
+  for (const p of chosen) {
+    const base: BrainProposal = proposals[p.index];
+    if (!allowed.includes(base.type)) continue;
+    const title = cleanText(p.title || base.title, 300);
+    if (!title) continue;
+    const effort = p.effort_minutes === null || p.effort_minutes === undefined ? null : Number(p.effort_minutes);
+    const done = cleanBody(p.done_criteria ?? base.done_criteria, 600);
+    const isLeaf = base.type === 'action' || base.type === 'task';
+    const { data, error } = await db()
+      .from('align_nodes')
+      .insert({
+        type: base.type,
+        title,
+        body: cleanBody(base.body, 5000),
+        done_criteria: done,
+        effort_minutes: effort && Number.isInteger(effort) && effort > 0 && effort <= 100000 ? effort : null,
+        cadence: cleanText(p.cadence ?? base.cadence, 120),
+        parent_id: target.node ? target.id : null,
+        sector_id: target.node ? null : target.id,
+        status: 'active',
+        sort: ++sort,
+        // A leaf the brain wrote with a finish line is ready to do; anything else gets broken down next.
+        actionable: isLeaf && Boolean(done),
+        brain_state: isLeaf && done ? 'actionable' : 'untouched',
+      })
+      .select('id')
+      .single();
+    if (error || !data) return err(dbError(error, 'Could not add the pages. Try again.'));
+    proposals[p.index] = { ...base, title, status: 'added', created_id: data.id as string };
+    created.push({ id: data.id as string, title });
+  }
+  // Everything not picked is marked skipped, so the panel shows a clean result.
+  const finalProposals = proposals.map((p) => (p.status === 'added' ? p : { ...p, status: 'skipped' as const }));
+  await db().from('align_brain_messages').update({ data: { ...reply, proposals: finalProposals, closed: true } }).eq('id', messageId);
+  if (target.node) await db().from('align_nodes').update({ brain_state: 'broken_down' }).eq('id', target.id);
+  refresh();
+  return { ok: true, data: { created } };
+}
+
+export async function brainDismiss(messageId: string): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(messageId)) return err('That suggestion is already gone.');
+  const { data: msg } = await db().from('align_brain_messages').select('data').eq('id', messageId).maybeSingle();
+  if (!msg) return err('That suggestion is already gone.');
+  const reply = msg.data as BrainReply;
+  const proposals = (reply.proposals ?? []).map((p) => (p.status === 'added' ? p : { ...p, status: 'skipped' as const }));
+  const { error } = await db().from('align_brain_messages').update({ data: { ...reply, proposals, closed: true } }).eq('id', messageId);
+  if (error) return err('Could not dismiss it. Try again.');
+  refresh();
+  return { ok: true };
+}
+
+export async function addFact(fact: string, sectorId: string | null): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  const text = cleanText(fact, 500);
+  if (!text) return err('Write the fact first.');
+  const { error } = await db().from('align_facts').insert({ fact: text, sector_id: sectorId && isId(sectorId) ? sectorId : null, source: 'gibson' });
+  if (error) return err('Could not save it. Try again.');
+  refresh();
+  return { ok: true };
+}
+
+export async function removeFact(factId: string): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(factId)) return err('That fact is already gone.');
+  const { error } = await db().from('align_facts').update({ archived: true }).eq('id', factId);
+  if (error) return err('Could not remove it. Try again.');
+  refresh();
+  return { ok: true };
 }

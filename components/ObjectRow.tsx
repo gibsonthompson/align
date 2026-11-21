@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
 import { hrefFor, kindIcon, kindLabel } from '@/lib/kinds';
 import type { ObjectRef } from '@/lib/types';
 
@@ -26,28 +25,23 @@ export default function ObjectRow({
   const colour = sector?.colour ?? '#8a8a8a';
   const content = (
     <>
-      <span
-        className="row-icon"
-        style={{ color: colour, background: `color-mix(in srgb, ${colour} 16%, var(--surface-2))` }}
-        aria-hidden
-      >
-        <Icon size={17} strokeWidth={2.4} />
+      <span className="row-icon" aria-hidden>
+        <Icon size={15} strokeWidth={2} />
       </span>
       <span className="row-main">
-        <span className={`row-title${item.status === 'done' ? ' done' : ''}`} style={{ display: 'block' }}>
-          {item.title}
-        </span>
+        <span className={`row-title${item.status === 'done' ? ' done' : ''}`}>{item.title}</span>
         <span className="row-sub">
-          <span className="mono">{kindLabel(item)}</span>
-          {sector && item.object_type !== 'sector' && <span>{sector.name}</span>}
-          {item.snippet && <span className="dim">{item.snippet}</span>}
+          <span>{kindLabel(item)}</span>
+          {sector && item.object_type !== 'sector' && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, ['--c' as string]: colour }}>
+              <i className="swatch" aria-hidden />
+              {sector.name}
+            </span>
+          )}
+          {item.snippet && <span>{item.snippet}</span>}
         </span>
       </span>
-      {end ?? (
-        <span className="row-end">
-          <ChevronRight size={17} />
-        </span>
-      )}
+      {end}
     </>
   );
   if (asButton) {

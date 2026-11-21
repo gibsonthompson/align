@@ -6,6 +6,7 @@ export default function ReviewsPage() {
   return (
     <>
       <TopBar title="Reviews" />
+      <div className="content narrow">
       <ComingSoon
         phase={7}
         Icon={NotebookPen}
@@ -13,6 +14,7 @@ export default function ReviewsPage() {
         body="Reviews will walk your structure and record what you decide about each goal back onto its page."
         items={['Daily Check-In', 'Weekly Review', '90-Day Review', 'Annual Review']}
       />
+      </div>
     </>
   );
 }

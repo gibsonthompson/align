@@ -133,7 +133,7 @@ export default function QuickSwitcher({ sectors }: { sectors: SectorLookup }) {
             autoComplete="off"
             spellCheck={false}
           />
-          <button type="button" className="text-btn ghost" onClick={close}>
+          <button type="button" className="btn ghost" onClick={close}>
             Close
           </button>
         </div>

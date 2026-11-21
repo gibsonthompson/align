@@ -51,7 +51,14 @@ export interface AlignNode {
   archived: boolean;
   created_at: string;
   updated_at: string;
+  done_criteria: string;
+  effort_minutes: number | null;
+  cadence: string;
+  actionable: boolean;
+  brain_state: BrainState;
 }
+
+export type BrainState = 'untouched' | 'asking' | 'proposed' | 'broken_down' | 'actionable';
 
 // A child row as returned by align_children.
 export interface ChildRow {
@@ -64,6 +71,11 @@ export interface ChildRow {
   due_date: string | null;
   sector_id: string | null;
   sort: number;
+  done_criteria: string;
+  effort_minutes: number | null;
+  cadence: string;
+  actionable: boolean;
+  brain_state: BrainState;
   child_count: number;
   done_count: number;
   link_count: number;
@@ -110,4 +122,49 @@ export interface Activity {
   action: string;
   detail: Record<string, unknown>;
   at: string;
+}
+
+export interface BrainQuestion {
+  question: string;
+  why: string;
+  options: string[];
+}
+
+export interface BrainProposal {
+  type: NodeType;
+  title: string;
+  body: string;
+  done_criteria: string;
+  effort_minutes: number | null;
+  cadence: string;
+  why: string;
+  // Set once Gibson decides.
+  status?: 'open' | 'added' | 'skipped';
+  created_id?: string | null;
+}
+
+export interface BrainReply {
+  assessment: string;
+  actionable: boolean;
+  gap: string;
+  questions: BrainQuestion[];
+  proposals: BrainProposal[];
+  facts_learned: string[];
+}
+
+export interface BrainMessage {
+  id: string;
+  role: 'user' | 'brain';
+  content: string;
+  data: (BrainReply & { closed?: boolean }) | { answers?: { question: string; answer: string }[] } | Record<string, never>;
+  created_at: string;
+}
+
+export interface Fact {
+  id: string;
+  fact: string;
+  source: 'brain' | 'gibson';
+  sector_id: string | null;
+  node_id: string | null;
+  created_at: string;
 }

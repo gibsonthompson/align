@@ -6,6 +6,7 @@ export default function CalendarPage() {
   return (
     <>
       <TopBar title="Calendar" />
+      <div className="content narrow">
       <ComingSoon
         phase={5}
         Icon={CalendarDays}
@@ -13,6 +14,7 @@ export default function CalendarPage() {
         body="Every block on the calendar will belong to something in your life map and open the page it serves."
         items={['Day, Week And Month Views', 'Quarter And Year Timelines', 'Habit Slots', 'Drag To Reschedule', 'Sector Balance Per Week', 'Google Calendar Sync']}
       />
+      </div>
     </>
   );
 }

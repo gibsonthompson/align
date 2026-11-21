@@ -60,27 +60,26 @@ export default function LinksSection({
   }
 
   return (
-    <section className="card flush">
-      <div className="section-head">
-        <h2 className="section-title">
+    <section className="panel">
+      <div className="panel-head">
+        <h2 className="panel-title">
           Linked
           <span className="count">{links.length}</span>
         </h2>
         <div style={{ display: 'flex', gap: 6 }}>
           {links.length > 0 && (
-            <button type="button" className={`text-btn${editing ? '' : ' ghost'}`} onClick={() => setEditing((e) => !e)} aria-pressed={editing}>
+            <button type="button" className={`btn${editing ? '' : ' ghost'}`} onClick={() => setEditing((e) => !e)} aria-pressed={editing}>
               {editing ? 'Done' : 'Edit'}
             </button>
           )}
-          <button type="button" className="text-btn" onClick={() => setOpen(true)}>
-            <Plus size={15} strokeWidth={2.8} /> Link
+          <button type="button" className="btn" onClick={() => setOpen(true)}>
+            <Plus size={14} /> Link
           </button>
         </div>
       </div>
 
       {links.length === 0 ? (
         <EmptyState
-          small
           Icon={Link2}
           title="Nothing Linked Yet"
           body="Connect this to the goals it supports, the projects it depends on, or anything related."
@@ -100,11 +99,11 @@ export default function LinksSection({
                   sectors={sectors}
                   end={
                     <span className="row-end">
-                      <span className="rel-tag">{relationLabel(l.relation, l.direction)}</span>
+                      <span className="tag">{relationLabel(l.relation, l.direction)}</span>
                       {editing && (
                         <button
                           type="button"
-                          className="icon-btn small"
+                          className="btn icon"
                           aria-label={`Unlink ${l.title}`}
                           onClick={(e) => {
                             e.preventDefault();
@@ -201,13 +200,13 @@ function LinkSheet({
       {!target ? (
         <>
           <div className="field" style={{ position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 14, top: 15, color: 'var(--text-3)' }}>
-              {loading ? <Loader2 size={19} className="spin" /> : <Search size={19} />}
+            <span style={{ position: 'absolute', left: 10, top: 9, color: 'var(--text-3)' }}>
+              {loading ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
             </span>
             <input
               data-autofocus
               className="input"
-              style={{ paddingLeft: 44 }}
+              style={{ paddingLeft: 34 }}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search goals, projects, sectors"
@@ -216,7 +215,7 @@ function LinkSheet({
             />
           </div>
           {!q && items.length > 0 && <div className="field-label" style={{ margin: '4px 0 6px' }}>Recently Viewed</div>}
-          <div className="card flush" style={{ background: 'var(--surface)' }}>
+          <div className="panel" style={{ background: 'var(--panel)' }}>
             {items.length === 0 && !loading ? (
               <div className="switcher-empty">{q ? 'Nothing matches that yet.' : 'Start typing to find a page.'}</div>
             ) : (
@@ -228,7 +227,7 @@ function LinkSheet({
                     sectors={sectors}
                     asButton
                     onClick={() => setTarget(o)}
-                    end={already(o) ? <span className="rel-tag">Linked</span> : undefined}
+                    end={already(o) ? <span className="tag">Linked</span> : undefined}
                   />
                 ))}
               </div>
@@ -237,11 +236,11 @@ function LinkSheet({
         </>
       ) : (
         <>
-          <button type="button" className="text-btn ghost" style={{ marginBottom: 12, paddingLeft: 0 }} onClick={() => setTarget(null)}>
+          <button type="button" className="btn ghost" style={{ marginBottom: 12, marginLeft: -8 }} onClick={() => setTarget(null)}>
             <ArrowLeft size={15} /> Pick a different page
           </button>
-          <div className="card" style={{ background: 'var(--surface-2)', border: 0, marginBottom: 14 }}>
-            <p style={{ fontSize: 15, lineHeight: 1.5, fontWeight: 600, color: 'var(--text-2)' }}>
+          <div className="panel panel-body" style={{ marginBottom: 14 }}>
+            <p style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text-2)' }}>
               <b style={{ color: 'var(--text)' }}>{selfTitle}</b>{' '}
               {relation === 'supports' ? 'supports' : relation === 'depends_on' ? 'depends on' : 'is related to'}{' '}
               <b style={{ color: 'var(--text)' }}>{target.title}</b>
@@ -266,7 +265,7 @@ function LinkSheet({
               {error}
             </div>
           )}
-          <button type="button" className="btn primary block" onClick={save} disabled={saving}>
+          <button type="button" className="btn primary block lg" onClick={save} disabled={saving}>
             {saving ? <Loader2 size={18} className="spin" /> : <Link2 size={18} />} Link Them
           </button>
         </>

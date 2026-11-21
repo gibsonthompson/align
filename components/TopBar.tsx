@@ -1,23 +1,20 @@
-import Link from 'next/link';
-import { ChevronLeft } from 'lucide-react';
-import SearchButton from '@/components/SearchButton';
+import type { Crumb } from '@/lib/types';
+import Breadcrumbs from '@/components/Breadcrumbs';
+import MenuButton from '@/components/MenuButton';
 
-// Title on the left, search on the right. A back link when a page has a natural parent.
-export default function TopBar({ title, back, children }: { title?: string; back?: string; children?: React.ReactNode }) {
+// The bar across the top of every page: where you are on the left, actions on the right.
+export default function TopBar({ path, title, children }: { path?: Crumb[]; title?: string; children?: React.ReactNode }) {
   return (
-    <header className="topbar">
-      <div className="topbar-left">
-        {back && (
-          <Link href={back} className="icon-btn" aria-label="Back">
-            <ChevronLeft size={21} strokeWidth={2.6} />
-          </Link>
-        )}
-        {title && <h1>{title}</h1>}
-      </div>
-      <div className="topbar-actions">
-        {children}
-        <SearchButton />
-      </div>
+    <header className="top">
+      <MenuButton />
+      {path && path.length ? (
+        <Breadcrumbs path={path} />
+      ) : (
+        <span className="crumb here" style={{ padding: 0 }}>
+          {title}
+        </span>
+      )}
+      <div className="top-actions">{children}</div>
     </header>
   );
 }

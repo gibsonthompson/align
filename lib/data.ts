@@ -2,12 +2,13 @@ import 'server-only';
 import { db } from '@/lib/db';
 import { requireSession } from '@/lib/auth';
 import { addDaysISO, todayISO } from '@/lib/format';
-import type { Activity, AlignNode, ChildRow, Crumb, LinkRow, Note, ObjectRef, ObjectType, Sector } from '@/lib/types';
+import type { Activity, AlignNode, BrainMessage, ChildRow, Crumb, Fact, LinkRow, Note, ObjectRef, ObjectType, Sector } from '@/lib/types';
+import { brainConfigured, brainModel } from '@/lib/brain';
 
 const SECTOR_COLS =
   'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at';
 const NODE_COLS =
-  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at';
+  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state';
 const OBJECT_COLS = 'object_type, id, title, kind, sector_id, status, slug';
 
 function fail(what: string, error: { message: string } | null): never {
@@ -70,6 +71,7 @@ export interface SectorPage {
   activity: (Activity & { other?: ObjectRef | null })[];
   pinned: boolean;
   allSectors: Sector[];
+  brain: BrainData;
 }
 
 export async function getSectorPage(slug: string): Promise<SectorPage | null> {
@@ -79,7 +81,7 @@ export async function getSectorPage(slug: string): Promise<SectorPage | null> {
   if (!sector || sector.archived) return null;
   const s = sector as Sector;
 
-  const [path, roots, links, notes, activity, pinned, allSectors, counts] = await Promise.all([
+  const [path, roots, links, notes, activity, pinned, allSectors, counts, brain] = await Promise.all([
     db().rpc('align_sector_path', { p_id: s.id }),
     db().rpc('align_children', { p_parent: null, p_sector: s.id }),
     getLinks('sector', s.id),
@@ -88,6 +90,7 @@ export async function getSectorPage(slug: string): Promise<SectorPage | null> {
     isPinned('sector', s.id),
     getSectors(),
     db().rpc('align_sector_counts'),
+    getBrain('sector', s.id, [s.id, s.parent_id ?? ''].filter(Boolean)),
   ]);
   if (path.error) fail('the path', path.error);
   if (roots.error) fail('pages', roots.error);
@@ -104,6 +107,7 @@ export async function getSectorPage(slug: string): Promise<SectorPage | null> {
     activity,
     pinned,
     allSectors,
+    brain,
   };
 }
 
@@ -121,6 +125,7 @@ export interface NodePage {
   activity: (Activity & { other?: ObjectRef | null })[];
   pinned: boolean;
   allSectors: Sector[];
+  brain: BrainData;
 }
 
 export async function getNodePage(id: string): Promise<NodePage | null> {
@@ -130,7 +135,7 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
   if (!node) return null;
   const n = node as AlignNode;
 
-  const [path, children, links, notes, activity, pinned, allSectors] = await Promise.all([
+  const [path, children, links, notes, activity, pinned, allSectors, brain] = await Promise.all([
     db().rpc('align_node_path', { p_id: n.id }),
     db().rpc('align_children', { p_parent: n.id }),
     getLinks('node', n.id),
@@ -138,6 +143,7 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
     getActivity('node', n.id),
     isPinned('node', n.id),
     getSectors(),
+    getBrainForNode(n),
   ]);
   if (path.error) fail('the path', path.error);
   if (children.error) fail('the pages under this one', children.error);
@@ -152,6 +158,41 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
     activity,
     pinned,
     allSectors,
+    brain,
+  };
+}
+
+async function getBrainForNode(n: AlignNode): Promise<BrainData> {
+  const { data } = await db().from('align_sectors').select('id, parent_id').eq('id', n.sector_id ?? '00000000-0000-0000-0000-000000000000').maybeSingle();
+  const ids = [data?.id, data?.parent_id].filter(Boolean) as string[];
+  return getBrain('node', n.id, ids);
+}
+
+// ---------------------------------------------------------------------------
+// The brain on a page
+// ---------------------------------------------------------------------------
+
+export interface BrainData {
+  messages: BrainMessage[];
+  facts: Fact[];
+  configured: boolean;
+  model: string;
+}
+
+export async function getBrain(type: ObjectType, id: string, sectorIds: string[]): Promise<BrainData> {
+  const ors = ['and(sector_id.is.null,node_id.is.null)'];
+  const ids = sectorIds.filter(Boolean);
+  if (ids.length) ors.push(`sector_id.in.(${ids.join(',')})`);
+  if (type === 'node') ors.push(`node_id.eq.${id}`);
+  const [msgs, facts] = await Promise.all([
+    db().from('align_brain_messages').select('id, role, content, data, created_at').eq('object_type', type).eq('object_id', id).order('created_at').limit(80),
+    db().from('align_facts').select('id, fact, source, sector_id, node_id, created_at').eq('archived', false).or(ors.join(',')).order('created_at').limit(200),
+  ]);
+  return {
+    messages: (msgs.data ?? []) as BrainMessage[],
+    facts: (facts.data ?? []) as Fact[],
+    configured: brainConfigured(),
+    model: brainModel(),
   };
 }
 
@@ -316,6 +357,23 @@ export function topSector(sectors: Sector[], id: string | null): Sector | null {
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
+
+// Everything the sidebar shows: sectors, areas, top-level pages, pins, inbox count.
+export async function getSidebar() {
+  await requireSession();
+  const [sectors, roots, pinned, inbox] = await Promise.all([
+    getSectors(),
+    db().from('align_nodes').select('id, title, type, sector_id, status').is('parent_id', null).eq('archived', false).not('sector_id', 'is', null).order('sort').limit(600),
+    getPinned(),
+    db().from('align_nodes').select('id', { count: 'exact', head: true }).eq('archived', false).eq('status', 'inbox'),
+  ]);
+  return {
+    sectors,
+    roots: (roots.data ?? []) as { id: string; title: string; type: AlignNode['type']; sector_id: string; status: string }[],
+    pinned,
+    inbox: inbox.count ?? 0,
+  };
+}
 
 // Pages waiting to be filed (Clyde's captures land here once voice moves in).
 export async function getInbox(): Promise<ObjectRef[]> {

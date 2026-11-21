@@ -3,17 +3,20 @@ import { notFound } from 'next/navigation';
 import { Archive } from 'lucide-react';
 import { getNodePage, recordView, topSector } from '@/lib/data';
 import { sectorLookup } from '@/lib/sectors';
-import { hrefFor, NODE_KINDS } from '@/lib/kinds';
+import { NODE_KINDS } from '@/lib/kinds';
 import { isId } from '@/lib/ids';
+import { nextTypes } from '@/lib/brain';
 import TopBar from '@/components/TopBar';
-import Breadcrumbs from '@/components/Breadcrumbs';
-import NodeHero from '@/components/NodeHero';
+import { NodeProperties, NodeTitle } from '@/components/NodeEditor';
+import BrainPanel from '@/components/BrainPanel';
 import ChildrenSection from '@/components/ChildrenSection';
 import LinksSection from '@/components/LinksSection';
 import NotesSection from '@/components/NotesSection';
 import ActivitySection from '@/components/ActivitySection';
 
 export const dynamic = 'force-dynamic';
+// The brain can take a while to think.
+export const maxDuration = 120;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -22,8 +25,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: page ? `${page.node.title} · Align` : 'Align' };
 }
 
-export default async function NodePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function NodePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ brain?: string }> }) {
   const { id } = await params;
+  const { brain: brainParam } = await searchParams;
   if (!isId(id)) notFound();
   const page = await getNodePage(id);
   if (!page) notFound();
@@ -32,60 +36,58 @@ export default async function NodePage({ params }: { params: Promise<{ id: strin
 
   const lookup = sectorLookup(page.allSectors);
   const top = topSector(page.allSectors, node.sector_id);
-  const colour = page.sector?.colour ?? top?.colour ?? '#8a8a8a';
-  const up = page.path.length > 1 ? page.path[page.path.length - 2] : null;
   const K = NODE_KINDS[node.type];
-  const next = NODE_KINDS[K.next];
-  const allNext = page.children.every((c) => c.type === K.next);
+  const allowed = nextTypes('node', node.type);
+  const next = NODE_KINDS[allowed[0]];
+  const allNext = page.children.every((c) => c.type === allowed[0]);
 
   return (
     <>
-      <TopBar back={up ? hrefFor(up) : '/life'} />
-      <Breadcrumbs path={page.path} colour={colour} />
-      {node.archived && (
-        <div className="card" style={{ marginBottom: 14, display: 'flex', gap: 12, alignItems: 'center', background: 'var(--amber-soft)', border: 0 }}>
-          <Archive size={20} style={{ color: 'var(--amber)', flex: 'none' }} />
-          <p style={{ fontWeight: 600, fontSize: 14.5, lineHeight: 1.45 }}>
-            This page is archived. Restore it from the options menu to bring it and its pages back.
-          </p>
-        </div>
-      )}
-      <NodeHero key={node.id} node={node} sector={page.sector ?? top} pinned={page.pinned} allSectors={page.allSectors} sectors={lookup} />
-      <div className="stack">
-        {!node.archived && (
-          <ChildrenSection
-            key={`c-${node.id}`}
-            title={allNext ? next.plural : 'Pages Under This'}
-            items={page.children}
-            parentId={node.id}
-            sectorId={node.sector_id}
-            defaultType={K.next}
-            colour={colour}
-            emptyTitle={`No ${next.plural} Yet`}
-            emptyBody={emptyHint(node.type)}
-          />
+      <TopBar path={page.path} />
+      <div className="content">
+        {node.archived && (
+          <div className="banner">
+            <Archive size={15} /> This page is archived. Restore it from Properties to bring it and its pages back.
+          </div>
         )}
-        <LinksSection key={`l-${node.id}`} self={{ type: 'node', id: node.id }} selfTitle={node.title} links={page.links} sectors={lookup} />
-        <NotesSection key={`t-${node.id}`} attached={{ type: 'node', id: node.id }} notes={page.notes} />
-        <ActivitySection rows={page.activity} />
+        <div className="page">
+          <div className="page-main">
+            <NodeTitle key={node.id} node={node} />
+            {!node.archived && (
+              <BrainPanel
+                key={`b-${node.id}`}
+                object={{ type: 'node', id: node.id }}
+                nodeType={node.type}
+                sectorId={top?.id ?? null}
+                messages={page.brain.messages}
+                facts={page.brain.facts}
+                configured={page.brain.configured}
+                model={page.brain.model}
+                autoRun={brainParam === '1'}
+              />
+            )}
+            {!node.archived && (
+              <ChildrenSection
+                key={`c-${node.id}`}
+                title={allNext ? next.plural : 'Under This'}
+                items={page.children}
+                parentId={node.id}
+                sectorId={node.sector_id}
+                defaultType={K.next}
+                allowedTypes={[...new Set([...allowed, K.next])]}
+                emptyTitle={`No ${next.plural} Yet`}
+                emptyBody="Run the brain above to break this down, or add pages by hand below."
+              />
+            )}
+            <NotesSection key={`t-${node.id}`} attached={{ type: 'node', id: node.id }} notes={page.notes} />
+          </div>
+          <aside className="page-side">
+            <NodeProperties key={`p-${node.id}`} node={node} sector={page.sector ?? top} pinned={page.pinned} allSectors={page.allSectors} sectors={lookup} />
+            <LinksSection key={`l-${node.id}`} self={{ type: 'node', id: node.id }} selfTitle={node.title} links={page.links} sectors={lookup} />
+            <ActivitySection rows={page.activity} />
+          </aside>
+        </div>
       </div>
     </>
   );
-}
-
-function emptyHint(type: string): string {
-  switch (type) {
-    case 'vision':
-      return 'What has to be true twelve months from now to be on track for this? Add those milestones.';
-    case 'milestone':
-      return 'Break this year into what you can realistically pursue this quarter.';
-    case 'objective':
-      return 'What has to happen every week to hit this by the end of the quarter?';
-    case 'commitment':
-      return 'Add the specific things to do on a given day to keep this week on track.';
-    case 'project':
-      return 'Split the project into phases, then tasks under each.';
-    default:
-      return 'Add smaller steps under this one. Each opens its own page.';
-  }
 }

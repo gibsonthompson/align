@@ -6,6 +6,7 @@ export default function VisionPage() {
   return (
     <>
       <TopBar title="Vision" />
+      <div className="content narrow">
       <ComingSoon
         phase={6}
         Icon={Images}
@@ -13,6 +14,7 @@ export default function VisionPage() {
         body="Images on every sector and goal, plus your HQ vision board photos brought over and filed by sector."
         items={['Sector And Goal Boards', 'The Full Gallery', 'Morning Feed Mode', 'Achieved Wall', 'Before And After', 'HQ Photo Import']}
       />
+      </div>
     </>
   );
 }

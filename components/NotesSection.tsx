@@ -30,9 +30,9 @@ export default function NotesSection({ attached, notes }: { attached: { type: Ob
   }
 
   return (
-    <section className="card flush">
-      <div className="section-head">
-        <h2 className="section-title">
+    <section className="panel">
+      <div className="panel-head">
+        <h2 className="panel-title">
           Notes
           <span className="count">{notes.length}</span>
         </h2>
@@ -54,7 +54,7 @@ export default function NotesSection({ attached, notes }: { attached: { type: Ob
         />
         {text.trim() && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-            <button type="button" className="btn primary small" onClick={save} disabled={saving}>
+            <button type="button" className="btn primary" onClick={save} disabled={saving}>
               {saving && <Loader2 size={16} className="spin" />} Save Note
             </button>
           </div>
@@ -67,7 +67,7 @@ export default function NotesSection({ attached, notes }: { attached: { type: Ob
       </div>
       {notes.length === 0 ? (
         <div style={{ borderTop: '1px solid var(--border)' }}>
-          <EmptyState small Icon={NotebookText} title="No Notes Yet" body="Anything you jot here stays with this page and shows up in search." />
+          <EmptyState Icon={NotebookText} title="No Notes Yet" body="Anything you jot here stays with this page and shows up in search." />
         </div>
       ) : (
         notes.map((n) => <NoteItem key={n.id} note={n} />)
@@ -128,7 +128,7 @@ function NoteItem({ note }: { note: Note }) {
             <>
               <button
                 type="button"
-                className="text-btn ghost"
+                className="btn ghost"
                 onClick={() => {
                   setEditing(false);
                   setText(note.body);
@@ -136,25 +136,25 @@ function NoteItem({ note }: { note: Note }) {
               >
                 Cancel
               </button>
-              <button type="button" className="text-btn" onClick={save} disabled={busy}>
+              <button type="button" className="btn" onClick={save} disabled={busy}>
                 Save
               </button>
             </>
           ) : confirming ? (
             <>
-              <button type="button" className="text-btn ghost" onClick={() => setConfirming(false)}>
+              <button type="button" className="btn ghost" onClick={() => setConfirming(false)}>
                 Keep
               </button>
-              <button type="button" className="text-btn" style={{ color: 'var(--red)' }} onClick={remove} disabled={busy}>
+              <button type="button" className="btn" style={{ color: 'var(--red)' }} onClick={remove} disabled={busy}>
                 Remove Note
               </button>
             </>
           ) : (
             <>
-              <button type="button" className="text-btn ghost" onClick={() => setEditing(true)}>
+              <button type="button" className="btn ghost" onClick={() => setEditing(true)}>
                 Edit
               </button>
-              <button type="button" className="text-btn ghost" onClick={() => setConfirming(true)}>
+              <button type="button" className="btn ghost" onClick={() => setConfirming(true)}>
                 Remove
               </button>
             </>
