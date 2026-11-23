@@ -639,3 +639,17 @@ export async function removeFact(factId: string): Promise<ActionResult> {
   refresh();
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Connections
+// ---------------------------------------------------------------------------
+
+// Cuts ChatGPT off immediately: removing the client removes all its tokens.
+export async function disconnectClient(clientId: string): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (typeof clientId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(clientId)) return err('That connection is already gone.');
+  const { error } = await db().from('align_oauth_clients').delete().eq('client_id', clientId);
+  if (error) return err('Could not disconnect. Try again.');
+  refresh();
+  return { ok: true };
+}

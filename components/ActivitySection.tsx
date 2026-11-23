@@ -115,7 +115,14 @@ export default function ActivitySection({ rows }: { rows: Row[] }) {
             return (
               <div className="event" key={r.id}>
                 <span className={`pip${tone === 'strong' ? ' strong' : tone === 'good' ? ' good' : ''}`} aria-hidden />
-                <span className="what">{text}</span>
+                <span className="what">
+                  {text}
+                  {r.via === 'chatgpt' && (
+                    <span className="tag" style={{ marginLeft: 6, verticalAlign: 1 }}>
+                      via ChatGPT
+                    </span>
+                  )}
+                </span>
                 <span className="when">{timeAgo(r.at)}</span>
               </div>
             );

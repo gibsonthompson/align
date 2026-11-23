@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, sessionCookieOptions, verifySession } from '@/lib/session';
 
-const PUBLIC_PATHS = ['/lock', '/api/version'];
+// The ChatGPT connection checks its own OAuth tokens; the approval page asks for the PIN itself.
+const PUBLIC_PATHS = ['/lock', '/api/version', '/api/mcp', '/oauth', '/.well-known'];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));

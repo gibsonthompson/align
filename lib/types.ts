@@ -122,6 +122,7 @@ export interface Activity {
   action: string;
   detail: Record<string, unknown>;
   at: string;
+  via?: string | null;
 }
 
 export interface BrainQuestion {

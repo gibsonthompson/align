@@ -222,7 +222,7 @@ export async function getNotes(type: ObjectType, id: string): Promise<Note[]> {
 export async function getActivity(type: ObjectType, id: string, limit = 60): Promise<(Activity & { other?: ObjectRef | null })[]> {
   const { data, error } = await db()
     .from('align_activity')
-    .select('id, action, detail, at')
+    .select('id, action, detail, at, via')
     .eq('object_type', type)
     .eq('object_id', id)
     .order('at', { ascending: false })
