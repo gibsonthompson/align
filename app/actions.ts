@@ -8,9 +8,9 @@ import { db } from '@/lib/db';
 import { hasSession } from '@/lib/auth';
 import { missingEnvNames } from '@/lib/env';
 import { createSession, SESSION_COOKIE, sessionCookieOptions } from '@/lib/session';
-import { cleanBody, cleanText, isId, slugify } from '@/lib/ids';
-import { isISODate } from '@/lib/format';
-import { NODE_KINDS, SECTOR_ICON_NAMES } from '@/lib/kinds';
+import { cleanBody, cleanLink, cleanText, isId, slugify } from '@/lib/ids';
+import { addDaysISO, isISODate } from '@/lib/format';
+import { NODE_KINDS, PERIOD_TYPES, SECTOR_ICON_NAMES } from '@/lib/kinds';
 import type { ActionResult, AlignNode, BrainMessage, BrainProposal, BrainReply, NodeStatus, NodeType, ObjectRef, ObjectType, Relation, Sector } from '@/lib/types';
 import { BrainError, brainModel, nextTypes, runBrain, type BrainTarget } from '@/lib/brain';
 
@@ -124,9 +124,20 @@ export async function createNode(input: {
   const { data: last } = await q;
   if (last?.[0]) sort = Number(last[0].sort) + 1;
 
+  // A new Month or Week under a dated page picks up where the last one ended.
+  let start_date: string | null = null;
+  if (parentId && PERIOD_TYPES.includes(type)) {
+    const [{ data: parent }, { data: prev }] = await Promise.all([
+      db().from('align_nodes').select('start_date').eq('id', parentId).maybeSingle(),
+      db().from('align_nodes').select('due_date').eq('parent_id', parentId).eq('type', type).eq('archived', false).not('due_date', 'is', null).order('due_date', { ascending: false }).limit(1),
+    ]);
+    const prevEnd = prev?.[0]?.due_date as string | undefined;
+    start_date = prevEnd ? addDaysISO(prevEnd, 1) : ((parent?.start_date as string | null) ?? null);
+  }
+
   const { data, error } = await db()
     .from('align_nodes')
-    .insert({ type, title, parent_id: parentId, sector_id: parentId ? null : sectorId, status, sort })
+    .insert({ type, title, parent_id: parentId, sector_id: parentId ? null : sectorId, status, sort, start_date })
     .select('id')
     .single();
   if (error || !data) return err(dbError(error, 'Could not create the page. Try again.'));
@@ -148,6 +159,10 @@ export async function updateNode(
     effort_minutes?: number | null;
     cadence?: string;
     actionable?: boolean;
+    event_date?: string | null;
+    location?: string;
+    cost?: number | null;
+    link_url?: string;
   },
 ): Promise<ActionResult> {
   if (!(await hasSession())) return err(SIGNED_OUT);
@@ -182,11 +197,27 @@ export async function updateNode(
     if (patch.priority !== null && ![1, 2, 3].includes(patch.priority)) return err('Unknown priority.');
     row.priority = patch.priority;
   }
-  for (const key of ['start_date', 'due_date'] as const) {
+  if (patch.location !== undefined) row.location = cleanText(patch.location, 200);
+  if (patch.cost !== undefined) {
+    if (patch.cost !== null && !(Number.isFinite(patch.cost) && patch.cost >= 0 && patch.cost < 10_000_000)) return err('Cost is a dollar amount.');
+    row.cost = patch.cost === null ? null : Math.round(patch.cost * 100) / 100;
+  }
+  if (patch.link_url !== undefined) {
+    const u = cleanLink(patch.link_url);
+    if (u === null) return err('That link is not a valid web address.');
+    row.link_url = u;
+  }
+  for (const key of ['start_date', 'due_date', 'event_date'] as const) {
     const v = patch[key];
     if (v === undefined) continue;
     if (v !== null && v !== '' && !isISODate(v)) return err('That date is not valid.');
     row[key] = v || null;
+  }
+  // Moving the start of a Month or Week moves its end with it.
+  if (patch.start_date && patch.due_date === undefined) {
+    const { data: cur } = await db().from('align_nodes').select('type').eq('id', id).maybeSingle();
+    const type = (patch.type ?? cur?.type) as NodeType | undefined;
+    if (type && PERIOD_TYPES.includes(type)) row.due_date = null;
   }
   const start = (row.start_date ?? undefined) as string | undefined;
   const due = (row.due_date ?? undefined) as string | undefined;
@@ -442,7 +473,7 @@ export async function findObjects(query: string, types?: string[]): Promise<Acti
 const SECTOR_COLS =
   'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at';
 const NODE_COLS =
-  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state';
+  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state, event_date, link_url, location, cost';
 
 async function loadTarget(type: ObjectType, id: string): Promise<BrainTarget | null> {
   const { data: sectors } = await db().from('align_sectors').select(SECTOR_COLS);
@@ -547,7 +578,7 @@ export async function brainRun(
 // Turns the chosen proposals into real pages under this one.
 export async function brainAccept(
   messageId: string,
-  picks: { index: number; title: string; done_criteria: string; effort_minutes: number | null; cadence: string }[],
+  picks: { index: number; title: string; done_criteria: string; effort_minutes: number | null; cadence: string; start_date?: string | null; due_date?: string | null }[],
 ): Promise<ActionResult<{ created: { id: string; title: string }[] }>> {
   if (!(await hasSession())) return err(SIGNED_OUT);
   if (!isId(messageId)) return err('That suggestion is gone. Run the brain again.');
@@ -577,6 +608,10 @@ export async function brainAccept(
     const effort = p.effort_minutes === null || p.effort_minutes === undefined ? null : Number(p.effort_minutes);
     const done = cleanBody(p.done_criteria ?? base.done_criteria, 600);
     const isLeaf = base.type === 'action' || base.type === 'task';
+    const pickDate = (v: string | null | undefined, fallback: string | null | undefined) => (v === undefined ? (isISODate(fallback) ? fallback : null) : isISODate(v) ? v : null);
+    const start = pickDate(p.start_date, base.start_date);
+    let due = pickDate(p.due_date, base.due_date);
+    if (start && due && start > due) due = null;
     const { data, error } = await db()
       .from('align_nodes')
       .insert({
@@ -586,6 +621,8 @@ export async function brainAccept(
         done_criteria: done,
         effort_minutes: effort && Number.isInteger(effort) && effort > 0 && effort <= 100000 ? effort : null,
         cadence: cleanText(p.cadence ?? base.cadence, 120),
+        start_date: start,
+        due_date: due,
         parent_id: target.node ? target.id : null,
         sector_id: target.node ? null : target.id,
         status: 'active',
@@ -597,7 +634,7 @@ export async function brainAccept(
       .select('id')
       .single();
     if (error || !data) return err(dbError(error, 'Could not add the pages. Try again.'));
-    proposals[p.index] = { ...base, title, status: 'added', created_id: data.id as string };
+    proposals[p.index] = { ...base, title, start_date: start, due_date: due, status: 'added', created_id: data.id as string };
     created.push({ id: data.id as string, title });
   }
   // Everything not picked is marked skipped, so the panel shows a clean result.

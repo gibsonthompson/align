@@ -2,6 +2,8 @@ import {
   Brain,
   Briefcase,
   CalendarCheck,
+  CalendarDays,
+  CalendarRange,
   CircleCheck,
   CircleDot,
   Compass,
@@ -33,7 +35,9 @@ export interface KindInfo {
 export const NODE_KINDS: Record<NodeType, KindInfo> = {
   vision: { label: 'Five-Year Vision', plural: 'Five-Year Visions', next: 'milestone', Icon: Telescope, horizon: '5 Years' },
   milestone: { label: '12-Month Milestone', plural: '12-Month Milestones', next: 'objective', Icon: Flag, horizon: '12 Months' },
-  objective: { label: '90-Day Objective', plural: '90-Day Objectives', next: 'commitment', Icon: Target, horizon: '90 Days' },
+  objective: { label: '90-Day Objective', plural: '90-Day Objectives', next: 'month', Icon: Target, horizon: '90 Days' },
+  month: { label: 'Month', plural: 'Months', next: 'week', Icon: CalendarDays, horizon: 'One Month' },
+  week: { label: 'Week', plural: 'Weeks', next: 'action', Icon: CalendarRange, horizon: 'One Week' },
   commitment: { label: 'Weekly Commitment', plural: 'Weekly Commitments', next: 'action', Icon: CalendarCheck, horizon: 'This Week' },
   action: { label: 'Daily Action', plural: 'Daily Actions', next: 'task', Icon: CircleCheck, horizon: 'Today' },
   project: { label: 'Project', plural: 'Projects', next: 'phase', Icon: FolderKanban },
@@ -47,6 +51,8 @@ export const NODE_TYPE_ORDER: NodeType[] = [
   'vision',
   'milestone',
   'objective',
+  'month',
+  'week',
   'commitment',
   'action',
   'project',
@@ -56,6 +62,9 @@ export const NODE_TYPE_ORDER: NodeType[] = [
 ];
 
 // What a sector page offers to add at its top level.
+// Kinds that cover a stretch of calendar time and get their end date filled in.
+export const PERIOD_TYPES: NodeType[] = ['month', 'week'];
+
 export const SECTOR_ROOT_TYPES: NodeType[] = ['vision', 'milestone', 'objective', 'project', 'micro_goal', 'commitment'];
 
 export const STATUS_LABEL: Record<NodeStatus, string> = {

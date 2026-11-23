@@ -62,3 +62,51 @@ export function greeting(): string {
 export function longToday(): string {
   return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: TZ });
 }
+
+// "In 12 days", "Tomorrow", "Today", "3 days ago".
+export function countdown(iso: string | null): { text: string; tone: 'late' | 'soon' | 'later' } | null {
+  if (!iso) return null;
+  const today = new Date(`${todayISO()}T12:00:00Z`).getTime();
+  const at = new Date(`${iso.slice(0, 10)}T12:00:00Z`).getTime();
+  const days = Math.round((at - today) / 86_400_000);
+  if (days < 0) return { text: `${-days} ${days === -1 ? 'day' : 'days'} ago`, tone: 'late' };
+  if (days === 0) return { text: 'Today', tone: 'soon' };
+  if (days === 1) return { text: 'Tomorrow', tone: 'soon' };
+  if (days < 60) return { text: `In ${days} days`, tone: days <= 14 ? 'soon' : 'later' };
+  const weeks = Math.round(days / 7);
+  return { text: `In ${weeks} weeks`, tone: 'later' };
+}
+
+// "$95", "$1,250.50". Null stays empty.
+export function money(v: number | string | null | undefined): string {
+  if (v === null || v === undefined || v === '') return '';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '';
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
+}
+
+// "Dec 7 to Dec 13", "December 2026".
+export function spanLabel(start: string | null, end: string | null, type?: string): string {
+  if (!start) return '';
+  if (type === 'month' && end && start.slice(8) === '01' && addDaysISO(end, 1).slice(8) === '01') {
+    const d = new Date(`${start}T12:00:00Z`);
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+  return end ? `${shortDate(start)} to ${shortDate(end)}` : `From ${shortDate(start)}`;
+}
+
+// Monday of the week a date falls in.
+export function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7;
+  return addDaysISO(iso, -dow);
+}
+
+// Display host of a link, "runsignup.com".
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}

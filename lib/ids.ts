@@ -21,3 +21,23 @@ export function slugify(v: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
 }
+
+// A web link: '' clears it, a bare domain gets https://, anything else invalid is null.
+export function cleanLink(v: unknown): string | null {
+  if (v === null || v === undefined) return '';
+  if (typeof v !== 'string') return null;
+  let s = v.trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) {
+    if (/\s/.test(s) || !/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/|$|\?|#)/i.test(s)) return null;
+    s = `https://${s}`;
+  }
+  if (s.length > 2000) return null;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}

@@ -8,7 +8,7 @@ import { brainConfigured, brainModel } from '@/lib/brain';
 const SECTOR_COLS =
   'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at';
 const NODE_COLS =
-  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state';
+  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state, event_date, link_url, location, cost';
 const OBJECT_COLS = 'object_type, id, title, kind, sector_id, status, slug';
 
 function fail(what: string, error: { message: string } | null): never {
@@ -306,6 +306,8 @@ export interface TodayData {
   due: (AlignNode & { sector: Sector | null })[];
   overdue: (AlignNode & { sector: Sector | null })[];
   objectives: (AlignNode & { sector: Sector | null })[];
+  periods: (AlignNode & { sector: Sector | null })[];
+  events: (AlignNode & { sector: Sector | null })[];
   inbox: number;
   sectors: Sector[];
 }
@@ -314,7 +316,7 @@ export async function getToday(): Promise<TodayData> {
   await requireSession();
   const today = todayISO();
   const open = ['active', 'planned', 'inbox', 'paused'];
-  const [pinned, recent, due, overdue, objectives, inbox, sectors] = await Promise.all([
+  const [pinned, recent, due, overdue, objectives, inbox, sectors, periods, events] = await Promise.all([
     getPinned(),
     getRecent(6),
     db()
@@ -322,16 +324,32 @@ export async function getToday(): Promise<TodayData> {
       .select(NODE_COLS)
       .eq('archived', false)
       .in('status', open)
+      .not('type', 'in', '(month,week)')
       .gte('due_date', today)
       .lte('due_date', addDaysISO(today, 14))
       .order('due_date')
       .limit(20),
-    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', open).lt('due_date', today).order('due_date').limit(20),
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', open).not('type', 'in', '(month,week)').lt('due_date', today).order('due_date').limit(20),
     db().from('align_nodes').select(NODE_COLS).eq('archived', false).eq('type', 'objective').eq('status', 'active').order('due_date', { nullsFirst: false }).limit(12),
     db().from('align_nodes').select('id', { count: 'exact', head: true }).eq('archived', false).eq('status', 'inbox'),
     getSectors(),
+    // The months and weeks of plans that today falls inside.
+    db()
+      .from('align_nodes')
+      .select(NODE_COLS)
+      .eq('archived', false)
+      .in('type', ['month', 'week'])
+      .in('status', ['active', 'planned'])
+      .lte('start_date', today)
+      .gte('due_date', today)
+      .order('type')
+      .order('start_date')
+      .limit(20),
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).gte('event_date', today).lte('event_date', addDaysISO(today, 365)).order('event_date').limit(12),
   ]);
   if (due.error) fail('what is due', due.error);
+  if (periods.error) fail('this week', periods.error);
+  if (events.error) fail('events', events.error);
   if (overdue.error) fail('what is overdue', overdue.error);
   if (objectives.error) fail('objectives', objectives.error);
   const withSector = (rows: AlignNode[]) => rows.map((n) => ({ ...n, sector: topSector(sectors, n.sector_id) }));
@@ -341,6 +359,8 @@ export async function getToday(): Promise<TodayData> {
     due: withSector((due.data ?? []) as AlignNode[]),
     overdue: withSector((overdue.data ?? []) as AlignNode[]),
     objectives: withSector((objectives.data ?? []) as AlignNode[]),
+    periods: withSector((periods.data ?? []) as AlignNode[]),
+    events: withSector((events.data ?? []) as AlignNode[]),
     inbox: inbox.count ?? 0,
     sectors,
   };

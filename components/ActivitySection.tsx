@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { History } from 'lucide-react';
 import { hrefFor, NODE_KINDS, relationLabel, STATUS_LABEL } from '@/lib/kinds';
-import { shortDate, timeAgo } from '@/lib/format';
+import { money, shortDate, timeAgo } from '@/lib/format';
 import type { Activity, NodeStatus, NodeType, ObjectRef, Relation } from '@/lib/types';
 import EmptyState from '@/components/EmptyState';
 
@@ -89,6 +89,17 @@ function describe(r: Row): { text: React.ReactNode; tone: 'plain' | 'strong' | '
       return { text: <>Note added</>, tone: 'plain' };
     case 'note_removed':
       return { text: <>Note removed</>, tone: 'plain' };
+    case 'event':
+      return {
+        text: (
+          <>
+            Event details set{d.date ? `, on ${shortDate(d.date)}` : ''}
+            {d.location ? `, ${d.location}` : ''}
+            {d.cost !== null && d.cost !== undefined ? `, ${money(d.cost)}` : ''}
+          </>
+        ),
+        tone: 'plain',
+      };
     case 'rated':
       return { text: <>Ratings updated</>, tone: 'plain' };
     default:

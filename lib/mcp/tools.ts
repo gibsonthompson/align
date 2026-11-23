@@ -1,8 +1,8 @@
 import 'server-only';
 import { db } from '@/lib/db';
-import { isId, cleanBody, cleanText, slugify } from '@/lib/ids';
+import { isId, cleanBody, cleanLink, cleanText, slugify } from '@/lib/ids';
 import { isISODate, todayISO, addDaysISO } from '@/lib/format';
-import { NODE_KINDS } from '@/lib/kinds';
+import { NODE_KINDS, PERIOD_TYPES } from '@/lib/kinds';
 import type { NodeType, NodeStatus, Relation, Sector } from '@/lib/types';
 
 // The tools ChatGPT gets in Align. Read tools are marked read-only; everything
@@ -12,7 +12,7 @@ const NODE_TYPES = Object.keys(NODE_KINDS) as NodeType[];
 const STATUSES: NodeStatus[] = ['inbox', 'planned', 'active', 'done', 'paused', 'abandoned'];
 const RELATIONS: Relation[] = ['supports', 'depends_on', 'related'];
 const NODE_COLS =
-  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, done_criteria, effort_minutes, cadence, actionable, archived, sort, updated_at';
+  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, done_criteria, effort_minutes, cadence, actionable, archived, sort, updated_at, event_date, link_url, location, cost';
 const SECTOR_COLS = 'id, slug, name, parent_id, colour, summary, importance, satisfaction, attention_needed, mode, sort, archived';
 
 export class ToolError extends Error {}
@@ -84,6 +84,10 @@ function nodeSummary(n: Record<string, unknown>, ctx: Ctx) {
     ...(n.start_date ? { start_date: n.start_date } : {}),
     ...(n.due_date ? { due_date: n.due_date } : {}),
     ...(n.priority ? { priority: n.priority } : {}),
+    ...(n.event_date ? { event_date: n.event_date } : {}),
+    ...(n.location ? { location: n.location } : {}),
+    ...(n.cost !== null && n.cost !== undefined ? { cost_usd: Number(n.cost) } : {}),
+    ...(n.link_url ? { link_url: n.link_url } : {}),
     ready_to_do: Boolean(n.actionable),
     url: url(ctx, 'node', n.id as string),
   };
@@ -229,14 +233,15 @@ async function getDue(a: Args, ctx: Ctx) {
   const days = Math.min(Math.max(Number(a.days) || 14, 1), 120);
   const today = todayISO();
   const open = ['active', 'planned', 'inbox', 'paused'];
-  const [overdue, due, ready, objectives] = await Promise.all([
-    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', open).lt('due_date', today).order('due_date').limit(50),
-    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', open).gte('due_date', today).lte('due_date', addDaysISO(today, days)).order('due_date').limit(80),
+  const [overdue, due, ready, objectives, events] = await Promise.all([
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', open).not('type', 'in', '(month,week)').lt('due_date', today).order('due_date').limit(50),
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', open).not('type', 'in', '(month,week)').gte('due_date', today).lte('due_date', addDaysISO(today, days)).order('due_date').limit(80),
     db().from('align_nodes').select(NODE_COLS).eq('archived', false).eq('actionable', true).in('status', ['active', 'planned']).order('updated_at', { ascending: false }).limit(40),
     db().from('align_nodes').select(NODE_COLS).eq('archived', false).eq('type', 'objective').eq('status', 'active').limit(30),
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).gte('event_date', today).order('event_date').limit(30),
   ]);
   const map = (r: { data: unknown }) => ((r.data ?? []) as Record<string, unknown>[]).map((n) => nodeSummary(n, ctx));
-  return { today, window_days: days, overdue: map(overdue), due: map(due), ready_to_do: map(ready), active_90_day_objectives: map(objectives) };
+  return { today, window_days: days, overdue: map(overdue), due: map(due), ready_to_do: map(ready), active_90_day_objectives: map(objectives), upcoming_events: map(events) };
 }
 
 async function listFacts(a: Args) {
@@ -272,7 +277,26 @@ interface PageInput {
   priority?: unknown;
   status?: unknown;
   ready_to_do?: unknown;
+  event_date?: unknown;
+  location?: unknown;
+  cost_usd?: unknown;
+  link_url?: unknown;
   children?: unknown;
+}
+
+function cost(v: unknown): number | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null || v === '') return null;
+  const n = typeof v === 'string' ? Number(v.replace(/[$,\s]/g, '')) : Number(v);
+  if (!Number.isFinite(n) || n < 0 || n >= 10_000_000) throw new ToolError('cost_usd must be a dollar amount like 95 or 129.99.');
+  return Math.round(n * 100) / 100;
+}
+
+function link(v: unknown): string | undefined {
+  if (v === undefined) return undefined;
+  const u = cleanLink(v);
+  if (u === null) throw new ToolError('link_url must be a full web address like https://runsignup.com/...');
+  return u;
 }
 
 function pageRow(p: PageInput) {
@@ -287,6 +311,7 @@ function pageRow(p: PageInput) {
   if (!STATUSES.includes(status)) throw new ToolError(`status must be one of: ${STATUSES.join(', ')}.`);
   const start = date(p.start_date, 'start_date') ?? null;
   const due = date(p.due_date, 'due_date') ?? null;
+  if (PERIOD_TYPES.includes(type) && !start) throw new ToolError(`"${title}": a ${NODE_KINDS[type].label} needs a start_date (and usually a due_date).`);
   if (start && due && start > due) throw new ToolError(`"${title}": start_date is after due_date.`);
   const done = str(p.done_criteria, 600, 'done_criteria') ?? '';
   const leaf = type === 'action' || type === 'task';
@@ -304,6 +329,10 @@ function pageRow(p: PageInput) {
     status,
     actionable: ready,
     brain_state: ready ? 'actionable' : 'untouched',
+    event_date: date(p.event_date, 'event_date') ?? null,
+    location: str(p.location, 200, 'location') ?? '',
+    cost: cost(p.cost_usd) ?? null,
+    link_url: link(p.link_url) ?? '',
   };
 }
 
@@ -391,8 +420,17 @@ async function updatePage(a: Args, ctx: Ctx) {
   const d = date(a.due_date, 'due_date');
   if (s !== undefined) row.start_date = s;
   if (d !== undefined) row.due_date = d;
-  const start = (row.start_date ?? n.start_date) as string | null;
-  const due = (row.due_date ?? n.due_date) as string | null;
+  // Moving the start of a Month or Week moves its end with it.
+  if (s && d === undefined && PERIOD_TYPES.includes((row.type ?? n.type) as NodeType)) row.due_date = null;
+  const ev = date(a.event_date, 'event_date');
+  if (ev !== undefined) row.event_date = ev;
+  if (a.location !== undefined) row.location = str(a.location, 200, 'location') ?? '';
+  const c = cost(a.cost_usd);
+  if (c !== undefined) row.cost = c;
+  const l = link(a.link_url);
+  if (l !== undefined) row.link_url = l;
+  const start = (row.start_date !== undefined ? row.start_date : n.start_date) as string | null;
+  const due = (row.due_date !== undefined ? row.due_date : n.due_date) as string | null;
   if (start && due && start > due) throw new ToolError('start_date is after due_date.');
   if (a.ready_to_do !== undefined) {
     row.actionable = Boolean(a.ready_to_do);
@@ -520,21 +558,123 @@ async function createArea(a: Args, ctx: Ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// Schedule and bulk tools
+// ---------------------------------------------------------------------------
+
+async function getSchedule(a: Args, ctx: Ctx) {
+  const today = todayISO();
+  const from = (date(a.from, 'from') ?? today) as string;
+  const to = (date(a.to, 'to') ?? addDaysISO(from, 13)) as string;
+  if (to < from) throw new ToolError('to is before from.');
+  if (addDaysISO(from, 92) < to) throw new ToolError('Ask for at most 93 days at a time.');
+  const open = ['active', 'planned', 'inbox', 'paused'];
+  const statuses = a.include_done === true ? [...open, 'done'] : open;
+  const [dated, periods, events, overdue] = await Promise.all([
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', statuses).not('type', 'in', '(month,week)').gte('due_date', from).lte('due_date', to).order('due_date').order('sort').limit(400),
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', statuses).in('type', PERIOD_TYPES).lte('start_date', to).gte('due_date', from).order('start_date').limit(100),
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).gte('event_date', from).lte('event_date', to).order('event_date').limit(100),
+    db().from('align_nodes').select(NODE_COLS).eq('archived', false).in('status', open).not('type', 'in', '(month,week)').lt('due_date', today).order('due_date').limit(60),
+  ]);
+  if (dated.error || periods.error || events.error || overdue.error) throw new ToolError('Could not load the schedule.');
+  const rows = [...(dated.data ?? []), ...(periods.data ?? []), ...(events.data ?? []), ...(overdue.data ?? [])] as Record<string, unknown>[];
+  // What each item serves, so the schedule reads in context.
+  const parentIds = [...new Set(rows.map((r) => r.parent_id as string | null).filter(Boolean))] as string[];
+  const parents = new Map<string, { title: string; type: NodeType }>();
+  if (parentIds.length) {
+    const { data } = await db().from('align_nodes').select('id, title, type').in('id', parentIds.slice(0, 500));
+    for (const p of (data ?? []) as { id: string; title: string; type: NodeType }[]) parents.set(p.id, p);
+  }
+  const all = await sectors();
+  const sectorName = (id: unknown) => {
+    const s = all.find((x) => x.id === id);
+    const top = s?.parent_id ? all.find((x) => x.id === s.parent_id) : s;
+    return top ? (s && s.id !== top.id ? `${top.name} / ${s.name}` : top.name) : null;
+  };
+  const shape = (r: Record<string, unknown>) => {
+    const parent = r.parent_id ? parents.get(r.parent_id as string) : undefined;
+    return { ...nodeSummary(r, ctx), sector: sectorName(r.sector_id), ...(parent ? { part_of: `${NODE_KINDS[parent.type]?.label}: ${parent.title}` } : {}) };
+  };
+  const days: { date: string; weekday: string; items: ReturnType<typeof shape>[]; events: ReturnType<typeof shape>[] }[] = [];
+  for (let d = from; d <= to; d = addDaysISO(d, 1)) {
+    days.push({
+      date: d,
+      weekday: new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }),
+      items: ((dated.data ?? []) as Record<string, unknown>[]).filter((r) => r.due_date === d).map(shape),
+      events: ((events.data ?? []) as Record<string, unknown>[]).filter((r) => r.event_date === d).map(shape),
+    });
+  }
+  return {
+    today,
+    from,
+    to,
+    overdue: ((overdue.data ?? []) as Record<string, unknown>[]).map(shape),
+    months_and_weeks: ((periods.data ?? []) as Record<string, unknown>[]).map(shape),
+    days: days.map((d) => ({ ...d, planned_minutes: d.items.reduce((m, i) => m + (Number(i.effort_minutes) || 0), 0) })),
+    note: 'Items are dated by due_date. Exact time slots arrive with the calendar.',
+  };
+}
+
+async function updatePages(a: Args, ctx: Ctx) {
+  const list = a.updates as Args[];
+  if (!Array.isArray(list) || !list.length) throw new ToolError('updates must be a non-empty list of { id, ...fields }.');
+  if (list.length > 100) throw new ToolError('Update at most 100 pages per call.');
+  const updated: unknown[] = [];
+  const failed: { id: unknown; error: string }[] = [];
+  for (const u of list) {
+    try {
+      const res = (await updatePage(u ?? {}, ctx)) as { updated: { id: string; title: string; status: string } };
+      updated.push({ id: res.updated.id, title: res.updated.title, status: res.updated.status });
+    } catch (e) {
+      failed.push({ id: u?.id, error: e instanceof ToolError ? e.message : 'Could not save.' });
+    }
+  }
+  return { updated_count: updated.length, updated, ...(failed.length ? { failed } : {}) };
+}
+
+async function shiftDates(a: Args) {
+  const ids = (Array.isArray(a.ids) ? a.ids : a.id ? [a.id] : []) as unknown[];
+  if (!ids.length) throw new ToolError('Give id or ids of the pages to shift.');
+  if (ids.length > 100) throw new ToolError('Shift at most 100 pages per call (children come along automatically).');
+  for (const id of ids) if (!isId(id)) throw new ToolError(`${String(id)} is not a valid page id.`);
+  const days = Number(a.days);
+  if (!Number.isInteger(days) || days === 0 || Math.abs(days) > 730) throw new ToolError('days is a whole number from -730 to 730, not 0.');
+  const since = new Date().toISOString();
+  const { data, error } = await db().rpc('align_shift_dates', {
+    p_ids: ids,
+    p_days: days,
+    p_with_children: a.include_children !== false,
+    p_open_only: a.include_done !== true,
+  });
+  if (error) throw new ToolError('Could not shift the dates.');
+  await tagVia(since);
+  return { pages_shifted: Number(data ?? 0), by_days: days, note: 'Event dates are never moved.' };
+}
+
+// ---------------------------------------------------------------------------
 // Definitions
 // ---------------------------------------------------------------------------
 
 const pageSchema: Record<string, unknown> = {
   type: 'object',
   properties: {
-    type: { type: 'string', enum: NODE_TYPES, description: 'vision (5 years), milestone (12 months), objective (90 days), commitment (weekly), action (daily), project, phase, task, micro_goal' },
+    type: {
+      type: 'string',
+      enum: NODE_TYPES,
+      description:
+        'vision (5 years), milestone (12 months), objective (90 days), month (one dated month of a plan), week (one dated week of a plan), commitment (a recurring weekly habit), action (daily), project, phase, task, micro_goal',
+    },
     title: { type: 'string', description: 'Short, specific, sentence case. Actions start with a verb and name the exact thing.' },
     body: { type: 'string', description: 'What it looks like when it is real, and why it matters.' },
     done_criteria: { type: 'string', description: 'The measurable finish line. Required for actions and tasks to count as ready to do.' },
     effort_minutes: { type: 'integer', description: 'For actions and tasks: minutes in one sitting (90 or less).' },
     cadence: { type: 'string', description: 'For weekly commitments, e.g. "4 times a week, 20 minutes".' },
-    start_date: { type: 'string', description: 'YYYY-MM-DD' },
-    due_date: { type: 'string', description: 'YYYY-MM-DD' },
+    start_date: { type: 'string', description: 'YYYY-MM-DD. Required for month and week (weeks start on a Monday).' },
+    due_date: { type: 'string', description: 'YYYY-MM-DD. For an action, the day to do it. Filled in automatically for month and week if left out.' },
     priority: { type: 'integer', enum: [1, 2, 3] },
+    event_date: { type: 'string', description: 'YYYY-MM-DD, the day a real-world event happens (race day, trip departure, exam).' },
+    location: { type: 'string', description: 'City, venue or address of the event.' },
+    cost_usd: { type: 'number', description: 'Price in US dollars, e.g. 95.' },
+    link_url: { type: 'string', description: 'Full https link to the sign-up or info page.' },
     status: { type: 'string', enum: STATUSES },
     ready_to_do: { type: 'boolean', description: 'Defaults to true for actions and tasks that have a done_criteria.' },
     children: { type: 'array', description: 'Pages to create directly under this one (same shape, nests).', items: { type: 'object' } },
@@ -593,10 +733,19 @@ export const TOOLS: {
   {
     name: 'get_due',
     title: 'What is due',
-    description: 'Overdue pages, pages due in the next N days (default 14), actions that are ready to do, and active 90-day objectives.',
+    description: 'Overdue pages, pages due in the next N days (default 14), actions that are ready to do, active 90-day objectives and upcoming events.',
     inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 120 } } },
     annotations: READ,
     run: getDue,
+  },
+  {
+    name: 'get_schedule',
+    title: 'Get the schedule',
+    description:
+      'Day by day view of a date range (default the next 14 days, at most 93): what is dated each day with its minutes and what it is part of, events on each day, the months and weeks of plans that overlap the range, and everything overdue. Use it before planning or dating new actions, to spread the load and avoid stacking days.',
+    inputSchema: { type: 'object', properties: { from: { type: 'string', description: 'YYYY-MM-DD, default today' }, to: { type: 'string', description: 'YYYY-MM-DD' }, include_done: { type: 'boolean' } } },
+    annotations: READ,
+    run: getSchedule,
   },
   {
     name: 'list_facts',
@@ -622,7 +771,8 @@ export const TOOLS: {
   {
     name: 'update_page',
     title: 'Update a page',
-    description: 'Change any field of a page: title, description, status (mark done with status "done"), kind, priority, dates, done criteria, effort, cadence, ready to do. Use null to clear a date, priority or effort.',
+    description:
+      'Change any field of a page: title, description, status (mark done with status "done"), kind, priority, dates, done criteria, effort, cadence, ready to do, and event details (event_date, location, cost_usd, link_url). Use null to clear a date, priority, effort or cost, and "" to clear text.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -638,11 +788,43 @@ export const TOOLS: {
         effort_minutes: { type: ['integer', 'null'] },
         cadence: { type: 'string' },
         ready_to_do: { type: 'boolean' },
+        event_date: { type: ['string', 'null'] },
+        location: { type: 'string' },
+        cost_usd: { type: ['number', 'null'] },
+        link_url: { type: 'string' },
       },
       required: ['id'],
     },
     annotations: WRITE,
     run: updatePage,
+  },
+  {
+    name: 'update_pages',
+    title: 'Update many pages',
+    description:
+      'Apply update_page to up to 100 pages in one call, each as { id, ...fields }. Use it to mark a batch done, re-date a week of actions, or reprioritise. Pages that fail are listed with the reason; the rest still save.',
+    inputSchema: { type: 'object', properties: { updates: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object' } } }, required: ['updates'] },
+    annotations: WRITE,
+    run: updatePages,
+  },
+  {
+    name: 'shift_dates',
+    title: 'Shift dates',
+    description:
+      'Move the start and due dates of pages forward (positive days) or back (negative), by default with everything under them and only pages not yet done. Use it when life slips, for example pushing the rest of a training block back a week. Event dates never move.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        ids: { type: 'array', items: { type: 'string' } },
+        days: { type: 'integer', minimum: -730, maximum: 730 },
+        include_children: { type: 'boolean', description: 'Default true' },
+        include_done: { type: 'boolean', description: 'Also move pages already done. Default false' },
+      },
+      required: ['days'],
+    },
+    annotations: WRITE,
+    run: shiftDates,
   },
   {
     name: 'move_page',
@@ -716,7 +898,11 @@ export const TOOLS: {
 
 export const INSTRUCTIONS = `Align is Gibson's personal life operating system. Every part of his life, from the five-year vision down to today's action, is a page that links to everything it touches.
 
-Structure: 9 life sectors (each with areas). Under a sector: Five-Year Vision, then 12-Month Milestone, then 90-Day Objective, then Weekly Commitment, then Daily Action, then Task. Projects split into Phases and Tasks. Micro Goals split into Actions or Tasks. The hierarchy is flexible: not every goal needs every level.
+Structure: 9 life sectors (each with areas). Under a sector: Five-Year Vision, then 12-Month Milestone, then 90-Day Objective, then Month, then Week, then Daily Action, then Task. Projects split into Phases (or Months and Weeks) and Tasks. Micro Goals split into Actions or Tasks. The hierarchy is flexible: not every goal needs every level.
+
+Months and Weeks are dated stretches of a plan ("Month 2: build to 20 miles a week", "Week 6: first 8 mile long run"). Give each a start_date (weeks start on Monday); the end fills in. A Weekly Commitment is different: a recurring habit with a cadence and no finish date. Use Months and Weeks for anything with a deadline that has to build progressively (a race, an exam, a launch, a savings target); use Weekly Commitments for steady habits.
+
+Any page can be a real event: event_date, location, cost_usd and link_url. A race, a trip, a concert, a course: put the event on the goal page itself so the whole plan can work back from it.
 
 How to work in Align:
 - Start with get_life_overview, and use get_tree or get_page before adding to an area, so nothing is duplicated and new pages land in the right place.
@@ -725,5 +911,8 @@ How to work in Align:
 - An action or task is ready to do only if it fits one sitting (90 minutes or less), starts with a verb, names the exact object, names the method or tool when it matters, and has a measurable done_criteria. "Focus on the G to C transition" is not ready. "Play bars 1 to 8 of the Wonderwall verse with a metronome at 60 BPM until 3 clean run-throughs, then raise it to 66" is.
 - When the right next step depends on a choice only Gibson can make (his tastes, his level, his time, his money), ask him before creating pages.
 - Prefer creating a whole chain in one create_pages call with nested children.
+- For anything in the real world (races, events, classes, products, prices), search the web first, show Gibson the real options with dates, prices and links, let him pick, then write the chosen one in with its event details.
+- Plans with a date work backward from it. Lay out the Months, then the Weeks inside each Month with exact dates, then date each Daily Action on a sensible day of its week (due_date). Check get_schedule first so new actions do not stack onto days that are already full.
+- When something slips, use shift_dates or update_pages to re-date what is left rather than leaving it overdue.
 - After writing, share the page links so he can open them in Align.
 - Style for anything you write into Align: plain and specific, sentence case titles, no em dashes, never the words "tackle" or "tackling".`;

@@ -1,7 +1,7 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import { NODE_KINDS } from '@/lib/kinds';
-import { todayISO } from '@/lib/format';
+import { isISODate, todayISO } from '@/lib/format';
 import type { AlignNode, BrainMessage, BrainReply, Fact, NodeType, ObjectType, Sector } from '@/lib/types';
 
 // The planning brain. Reads the whole path above a page, what is already under
@@ -25,17 +25,21 @@ export function nextTypes(objectType: ObjectType, nodeType?: NodeType): NodeType
     case 'vision':
       return ['milestone', 'project'];
     case 'milestone':
-      return ['objective', 'project'];
+      return ['objective', 'month', 'project'];
     case 'objective':
-      return ['commitment', 'action', 'project'];
+      return ['month', 'week', 'commitment', 'action', 'project'];
+    case 'month':
+      return ['week', 'commitment', 'action'];
+    case 'week':
+      return ['action', 'task'];
     case 'commitment':
       return ['action'];
     case 'action':
       return ['task'];
     case 'project':
-      return ['phase', 'task'];
+      return ['phase', 'month', 'week', 'task'];
     case 'phase':
-      return ['task'];
+      return ['week', 'task'];
     case 'micro_goal':
       return ['action', 'task'];
     default:
@@ -46,8 +50,10 @@ export function nextTypes(objectType: ObjectType, nodeType?: NodeType): NodeType
 const SYSTEM = `You are the planning brain inside Align, Gibson's personal life operating system.
 
 Your job is to reverse-engineer what he wants out of life into a chain of pages that ends in actions he can do today without having to think. The structure is:
-Five-Year Vision, then 12-Month Milestone, then 90-Day Objective, then Weekly Commitment, then Daily Action, then Task.
-Projects split into Phases, then Tasks. Micro Goals split into Actions or Tasks.
+Five-Year Vision, then 12-Month Milestone, then 90-Day Objective, then Month, then Week, then Daily Action, then Task.
+Projects split into Phases (or Months and Weeks), then Tasks. Micro Goals split into Actions or Tasks.
+A Month and a Week are specific stretches of the calendar inside a plan ("Month 2: build to 20 miles a week", "Week of Dec 7: 3 runs, 14 miles"). They carry start_date (a Monday for weeks, the 1st or the plan's start for months) and the end date fills in. A Weekly Commitment is different: a recurring habit with a cadence ("run 3 times a week") that holds week after week. Use Months and Weeks when a goal has a date and needs to build progressively toward it (a race, an exam, a launch, a savings target). Use Weekly Commitments for steady habits with no finish date.
+Any page can also be a real event: event_date (the day it happens), location, cost in dollars, and link_url (the sign-up or info page).
 
 How you work, every time:
 1. Read the whole path from the sector down to the current page. Every layer you propose must be strictly more specific than the current page and must clearly serve everything above it.
@@ -59,7 +65,8 @@ How you work, every time:
 7. Otherwise propose 2 to 7 pages for the NEXT layer only, using only the allowed types you are given. Each needs a short title (no trailing period), a one or two sentence body describing what it looks like when it is real, a done criterion, effort_minutes for actions and tasks (null otherwise), and a cadence for weekly commitments (for example "4 times a week, 20 minutes", empty otherwise). Do not repeat pages that already exist under the current page.
 8. If the current page is vague, mixes several goals, or has an unrealistic timeline, say so plainly in the assessment and propose the split or the fix.
 9. Put any durable fact you learned from his answers in facts_learned, written as a plain statement about him ("Likes Oasis and Tom Petty", "Owns an acoustic guitar, no amp", "Has 30 minutes on weekday evenings"). Leave it empty when there is nothing new.
-10. gap: one sentence on what still stands between this page and something he can do today. Empty when actionable.
+10. Dates. Work backward from any event_date or due_date above this page. When you propose Months or Weeks, give every one a start_date and due_date that fit inside the parent and lead up to the deadline without gaps, and title them by what changes that period ("Week 6: first 8 mile long run"). When you propose Daily Actions inside a Week, date each one (due_date) on a sensible day of that week. Leave dates empty when there is no deadline to work back from.
+11. gap: one sentence on what still stands between this page and something he can do today. Empty when actionable.
 
 Style: plain, direct, specific. No hype, no motivational filler. Never use the words "tackle" or "tackling". Never use em dashes. Titles in sentence case.`;
 
@@ -92,7 +99,7 @@ function schema(allowed: NodeType[]) {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['type', 'title', 'body', 'done_criteria', 'effort_minutes', 'cadence', 'why'],
+          required: ['type', 'title', 'body', 'done_criteria', 'effort_minutes', 'cadence', 'start_date', 'due_date', 'why'],
           properties: {
             type: { type: 'string', enum: allowed },
             title: { type: 'string' },
@@ -100,6 +107,8 @@ function schema(allowed: NodeType[]) {
             done_criteria: { type: 'string' },
             effort_minutes: { type: ['integer', 'null'] },
             cadence: { type: 'string' },
+            start_date: { type: ['string', 'null'], description: 'YYYY-MM-DD or null' },
+            due_date: { type: ['string', 'null'], description: 'YYYY-MM-DD or null' },
             why: { type: 'string', description: 'One short line on how this serves the page above it.' },
           },
         },
@@ -113,10 +122,18 @@ function schema(allowed: NodeType[]) {
 // Context
 // ---------------------------------------------------------------------------
 
-function line(n: Pick<AlignNode, 'type' | 'title' | 'body' | 'done_criteria' | 'cadence' | 'effort_minutes' | 'status' | 'due_date'>): string {
+type LineNode = Pick<AlignNode, 'type' | 'title' | 'body' | 'done_criteria' | 'cadence' | 'effort_minutes' | 'status' | 'due_date'> &
+  Partial<Pick<AlignNode, 'start_date' | 'event_date' | 'location' | 'cost' | 'link_url'>>;
+
+function line(n: LineNode): string {
   const bits = [`[${NODE_KINDS[n.type]?.label ?? n.type}] ${n.title}`];
   if (n.status && n.status !== 'active') bits.push(`(status: ${n.status})`);
+  if (n.start_date) bits.push(`(starts ${n.start_date})`);
   if (n.due_date) bits.push(`(due ${n.due_date})`);
+  if (n.event_date) bits.push(`(event on ${n.event_date})`);
+  if (n.location) bits.push(`(at ${n.location})`);
+  if (n.cost !== null && n.cost !== undefined) bits.push(`(costs $${n.cost})`);
+  if (n.link_url) bits.push(`(link ${n.link_url})`);
   let out = bits.join(' ');
   if (n.body?.trim()) out += `\n   Description: ${n.body.trim().slice(0, 800)}`;
   if (n.done_criteria?.trim()) out += `\n   Done when: ${n.done_criteria.trim()}`;
@@ -172,7 +189,7 @@ async function buildContext(target: BrainTarget, facts: Fact[]): Promise<string>
     while (cur?.parent_id && guard++ < 64) {
       const { data } = await db()
         .from('align_nodes')
-        .select('id, type, title, body, done_criteria, cadence, effort_minutes, status, due_date, parent_id')
+        .select('id, type, title, body, done_criteria, cadence, effort_minutes, status, start_date, due_date, event_date, location, cost, link_url, parent_id')
         .eq('id', cur.parent_id)
         .maybeSingle();
       if (!data) break;
@@ -183,7 +200,7 @@ async function buildContext(target: BrainTarget, facts: Fact[]): Promise<string>
     parts.push(`THIS PAGE:\n${line(target.node)}`);
 
     const [{ data: kids }, { data: sibs }] = await Promise.all([
-      db().from('align_nodes').select('type, title, body, done_criteria, cadence, effort_minutes, status, due_date').eq('parent_id', target.id).eq('archived', false).order('sort').limit(60),
+      db().from('align_nodes').select('type, title, body, done_criteria, cadence, effort_minutes, status, start_date, due_date, event_date, location, cost').eq('parent_id', target.id).eq('archived', false).order('sort').limit(60),
       target.node.parent_id
         ? db().from('align_nodes').select('type, title, status').eq('parent_id', target.node.parent_id).eq('archived', false).neq('id', target.id).limit(30)
         : target.node.sector_id
@@ -195,7 +212,7 @@ async function buildContext(target: BrainTarget, facts: Fact[]): Promise<string>
     if (siblings.length) parts.push(`ALONGSIDE THIS PAGE (same parent):\n${siblings.map((n) => `- [${NODE_KINDS[n.type]?.label}] ${n.title}${n.status === 'done' ? ' (done)' : ''}`).join('\n')}`);
   } else if (s) {
     const [{ data: roots }, { data: areas }] = await Promise.all([
-      db().from('align_nodes').select('type, title, body, done_criteria, cadence, effort_minutes, status, due_date').is('parent_id', null).eq('sector_id', s.id).eq('archived', false).limit(60),
+      db().from('align_nodes').select('type, title, body, done_criteria, cadence, effort_minutes, status, start_date, due_date, event_date, location, cost').is('parent_id', null).eq('sector_id', s.id).eq('archived', false).limit(60),
       db().from('align_sectors').select('name').eq('parent_id', s.id).eq('archived', false),
     ]);
     children = (roots ?? []) as AlignNode[];
@@ -322,6 +339,8 @@ function clean(r: BrainReply, allowed: NodeType[]): BrainReply {
         done_criteria: noDash(p.done_criteria).slice(0, 600),
         effort_minutes: Number.isInteger(p.effort_minutes) && (p.effort_minutes as number) > 0 ? Math.min(p.effort_minutes as number, 100000) : null,
         cadence: noDash(p.cadence).slice(0, 120),
+        start_date: isISODate(p.start_date) ? p.start_date : null,
+        due_date: isISODate(p.due_date) && !(isISODate(p.start_date) && p.start_date > p.due_date) ? p.due_date : null,
         why: noDash(p.why).slice(0, 400),
         status: 'open' as const,
         created_id: null,

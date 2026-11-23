@@ -2,6 +2,8 @@ export type NodeType =
   | 'vision'
   | 'milestone'
   | 'objective'
+  | 'month'
+  | 'week'
   | 'commitment'
   | 'action'
   | 'micro_goal'
@@ -56,6 +58,10 @@ export interface AlignNode {
   cadence: string;
   actionable: boolean;
   brain_state: BrainState;
+  event_date: string | null;
+  link_url: string;
+  location: string;
+  cost: number | null;
 }
 
 export type BrainState = 'untouched' | 'asking' | 'proposed' | 'broken_down' | 'actionable';
@@ -76,6 +82,10 @@ export interface ChildRow {
   cadence: string;
   actionable: boolean;
   brain_state: BrainState;
+  event_date: string | null;
+  location: string;
+  cost: number | null;
+  link_url: string;
   child_count: number;
   done_count: number;
   link_count: number;
@@ -138,6 +148,8 @@ export interface BrainProposal {
   done_criteria: string;
   effort_minutes: number | null;
   cadence: string;
+  start_date?: string | null;
+  due_date?: string | null;
   why: string;
   // Set once Gibson decides.
   status?: 'open' | 'added' | 'skipped';

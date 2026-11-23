@@ -26,6 +26,8 @@ Migrations live in `supabase/migrations` and are already applied to Detail Pro:
 - `0001_align_init.sql`: sectors (9 defaults plus 51 areas), nodes (the tree), links (any to any, both directions), notes, activity (written by triggers), pins, recents, the PIN gate, the object view, breadcrumbs, children, links and search functions
 - `0002_align_tree_ops.sql`: sector counts, archive or restore a page with its branch, move a page with its branch
 - `0003_align_brain.sql`: done criteria, effort, cadence and actionable on pages; the brain's conversation per page; facts it learns about Gibson
+- `0004_align_chatgpt.sql`: OAuth clients, codes and tokens for the ChatGPT connection; marks history rows written by ChatGPT
+- `0005_align_months_weeks_events.sql`: Month and Week page kinds (end dates fill themselves in), event date, location, cost and link on any page, shifting a plan's dates, and ended weeks no longer counting as overdue
 
 ## The Brain
 

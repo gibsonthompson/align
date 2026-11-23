@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Orbit } from 'lucide-react';
 import { getToday } from '@/lib/data';
 import { sectorLookup } from '@/lib/sectors';
-import { dueLabel, greeting, longToday } from '@/lib/format';
+import { countdown, dueLabel, greeting, longToday, money, shortDate, spanLabel } from '@/lib/format';
 import type { AlignNode, ObjectRef } from '@/lib/types';
 import TopBar from '@/components/TopBar';
 import ObjectRow from '@/components/ObjectRow';
@@ -24,11 +24,27 @@ function Due({ n }: { n: AlignNode }) {
   );
 }
 
+function Period({ n }: { n: AlignNode }) {
+  return (
+    <span className="row-end">
+      <span className="tag">{spanLabel(n.start_date, n.due_date, n.type)}</span>
+    </span>
+  );
+}
+
+function Event({ n }: { n: AlignNode }) {
+  const c = countdown(n.event_date);
+  return <span className="row-end">{c && <span className={`tag ${c.tone === 'soon' ? 'soon' : ''}`}>{c.text}</span>}</span>;
+}
+
+// The event's own details stand in for the kind and sector line.
+const eventSub = (n: AlignNode) => [shortDate(n.event_date), n.location, money(n.cost)].filter(Boolean).join(' · ');
+
 export default async function TodayPage() {
   const t = await getToday();
   const lookup = sectorLookup(t.sectors);
   const coming = [...t.overdue, ...t.due];
-  const nothing = !t.pinned.length && !t.recent.length && !coming.length && !t.objectives.length;
+  const nothing = !t.pinned.length && !t.recent.length && !coming.length && !t.objectives.length && !t.periods.length && !t.events.length;
 
   return (
     <>
@@ -71,6 +87,23 @@ export default async function TodayPage() {
         ) : (
           <div className="two-col">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2 className="panel-title">
+                    Right Now <span className="count">{t.periods.length}</span>
+                  </h2>
+                  <span className="panel-note">The months and weeks you are in</span>
+                </div>
+                {t.periods.length ? (
+                  <div className="rows">
+                    {t.periods.map((n) => (
+                      <ObjectRow key={n.id} item={asRef(n)} sectors={lookup} end={<Period n={n} />} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState Icon={Orbit} title="No Plan Running" body="When a goal is broken into dated months and weeks, the ones you are in show up here." />
+                )}
+              </section>
               <section className="panel" id="coming">
                 <div className="panel-head">
                   <h2 className="panel-title">
@@ -107,6 +140,23 @@ export default async function TodayPage() {
               </section>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2 className="panel-title">
+                    Events <span className="count">{t.events.length}</span>
+                  </h2>
+                  <span className="panel-note">Next 12 months</span>
+                </div>
+                {t.events.length ? (
+                  <div className="rows">
+                    {t.events.map((n) => (
+                      <ObjectRow key={n.id} item={asRef(n)} sub={eventSub(n)} sectors={lookup} end={<Event n={n} />} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState Icon={Orbit} title="No Events Yet" body="Races, trips and anything else with an event date show up here with a countdown." />
+                )}
+              </section>
               <section className="panel">
                 <div className="panel-head">
                   <h2 className="panel-title">

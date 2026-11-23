@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Archive, ArchiveRestore, FolderInput, Loader2, Pin } from 'lucide-react';
+import { Archive, ArchiveRestore, ExternalLink, FolderInput, Loader2, Pin, Plus } from 'lucide-react';
 import { archiveNode, setPinned, updateNode } from '@/app/actions';
-import { NODE_KINDS, NODE_TYPE_ORDER, STATUS_LABEL, STATUS_ORDER } from '@/lib/kinds';
-import { dueLabel } from '@/lib/format';
+import { NODE_KINDS, NODE_TYPE_ORDER, PERIOD_TYPES, STATUS_LABEL, STATUS_ORDER } from '@/lib/kinds';
+import { countdown, dueLabel, hostOf, spanLabel } from '@/lib/format';
 import type { AlignNode, NodeStatus, NodeType, Sector } from '@/lib/types';
 import Dropdown from '@/components/Dropdown';
 import Sheet from '@/components/Sheet';
@@ -72,7 +72,8 @@ export function NodeTitle({ node }: { node: AlignNode }) {
     <div className="page-title-block">
       <div className="eyebrow">
         <b>{K.label}</b>
-        {K.horizon && <span>{K.horizon}</span>}
+        {PERIOD_TYPES.includes(node.type) && node.start_date ? <span>{spanLabel(node.start_date, node.due_date, node.type)}</span> : K.horizon && <span>{K.horizon}</span>}
+        {node.event_date && <span className="tag">{countdown(node.event_date)?.text}</span>}
         {node.actionable && <span className="tag good">Ready To Do</span>}
         {state !== 'idle' && <span className="save-state">{state === 'saving' ? 'Saving' : state === 'saved' ? 'Saved' : 'Not saved'}</span>}
       </div>
@@ -141,6 +142,11 @@ export function NodeProperties({
   const [criteria, setCriteria] = useState(node.done_criteria);
   const [effort, setEffort] = useState(node.effort_minutes ? String(node.effort_minutes) : '');
   const [cadence, setCadence] = useState(node.cadence);
+  const [location, setLocation] = useState(node.location);
+  const [cost, setCost] = useState(node.cost === null ? '' : String(node.cost));
+  const [link, setLink] = useState(node.link_url);
+  const hasEvent = Boolean(node.event_date || node.location || node.cost !== null || node.link_url);
+  const [showEvent, setShowEvent] = useState(hasEvent);
   const [pin, setPin] = useState(pinned);
   const [moving, setMoving] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -151,11 +157,17 @@ export function NodeProperties({
     if (!isTyping('criteria')) setCriteria(node.done_criteria);
     if (!isTyping('effort')) setEffort(node.effort_minutes ? String(node.effort_minutes) : '');
     if (!isTyping('cadence')) setCadence(node.cadence);
-  }, [node.done_criteria, node.effort_minutes, node.cadence]);
+    if (!isTyping('location')) setLocation(node.location);
+    if (!isTyping('cost')) setCost(node.cost === null ? '' : String(node.cost));
+    if (!isTyping('link')) setLink(node.link_url);
+    if (hasEvent) setShowEvent(true);
+  }, [node.done_criteria, node.effort_minutes, node.cadence, node.location, node.cost, node.link_url, hasEvent]);
   useEffect(() => setPin(pinned), [pinned]);
 
   const due = node.status !== 'done' ? dueLabel(node.due_date) : null;
   const leaf = node.type === 'action' || node.type === 'task' || node.type === 'micro_goal';
+  const period = PERIOD_TYPES.includes(node.type);
+  const eventIn = countdown(node.event_date);
 
   async function togglePin() {
     const next = !pin;
@@ -230,7 +242,7 @@ export function NodeProperties({
           </div>
         </div>
         <div className="prop">
-          <span className="prop-label">Due</span>
+          <span className="prop-label">{period ? 'Ends' : 'Due'}</span>
           <div className="prop-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="date" className="prop-input" value={node.due_date ?? ''} disabled={node.archived} onChange={(e) => save({ due_date: e.target.value || null })} aria-label="Due date" style={{ colorScheme: 'dark' }} />
             {due && <span className={`tag ${due.tone === 'late' ? 'late' : due.tone === 'soon' ? 'soon' : ''}`}>{due.text}</span>}
@@ -312,6 +324,85 @@ export function NodeProperties({
           </div>
         </div>
       </div>
+      {showEvent ? (
+        <div className="props" style={{ borderTop: '1px solid var(--line)' }}>
+          <div className="prop">
+            <span className="prop-label">Event date</span>
+            <div className="prop-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="date" className="prop-input" value={node.event_date ?? ''} disabled={node.archived} onChange={(e) => save({ event_date: e.target.value || null })} aria-label="Event date" style={{ colorScheme: 'dark' }} />
+              {eventIn && <span className={`tag${eventIn.tone === 'soon' ? ' soon' : ''}`}>{eventIn.text}</span>}
+            </div>
+          </div>
+          <div className="prop">
+            <span className="prop-label">Location</span>
+            <div className="prop-value">
+              <input
+                data-field="location"
+                className="prop-input"
+                value={location}
+                disabled={node.archived}
+                placeholder="City, venue or address"
+                aria-label="Location"
+                maxLength={200}
+                onChange={(e) => setLocation(e.target.value)}
+                onBlur={() => location.trim() !== node.location && save({ location })}
+              />
+            </div>
+          </div>
+          <div className="prop">
+            <span className="prop-label">Cost</span>
+            <div className="prop-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="dim">$</span>
+              <input
+                data-field="cost"
+                className="prop-input"
+                inputMode="decimal"
+                value={cost}
+                disabled={node.archived}
+                placeholder="0"
+                aria-label="Cost in dollars"
+                style={{ width: 110 }}
+                onChange={(e) => setCost(e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1').slice(0, 10))}
+                onBlur={() => {
+                  const v = cost === '' ? null : Number(cost);
+                  if (v !== null && !Number.isFinite(v)) return setCost(node.cost === null ? '' : String(node.cost));
+                  if (v !== (node.cost === null ? null : Number(node.cost))) save({ cost: v });
+                }}
+              />
+            </div>
+          </div>
+          <div className="prop">
+            <span className="prop-label">Link</span>
+            <div className="prop-value" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'nowrap' }}>
+              <input
+                data-field="link"
+                className="prop-input"
+                style={{ flex: 1, minWidth: 0 }}
+                value={link}
+                disabled={node.archived}
+                placeholder="Sign-up or info page"
+                aria-label="Link"
+                inputMode="url"
+                onChange={(e) => setLink(e.target.value)}
+                onBlur={() => link.trim() !== node.link_url && save({ link_url: link })}
+              />
+              {node.link_url && (
+                <a href={node.link_url} target="_blank" rel="noopener noreferrer" className="btn icon" aria-label={`Open ${hostOf(node.link_url)}`} title={hostOf(node.link_url)}>
+                  <ExternalLink size={13} />
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        !node.archived && (
+          <div className="panel-body" style={{ borderTop: '1px solid var(--line)', paddingTop: 10, paddingBottom: 10 }}>
+            <button type="button" className="btn ghost" onClick={() => setShowEvent(true)}>
+              <Plus size={13} /> Add Event Details
+            </button>
+          </div>
+        )
+      )}
       <div className="panel-body" style={{ borderTop: '1px solid var(--line)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {node.archived ? (
           <button type="button" className="btn" onClick={() => archive(false)} disabled={busy}>

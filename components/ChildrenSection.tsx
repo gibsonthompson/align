@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowDown, ArrowUp, Check, Loader2, Plus } from 'lucide-react';
 import { createNode, reorderNode, updateNode } from '@/app/actions';
-import { NODE_KINDS, NODE_TYPE_ORDER, STATUS_LABEL } from '@/lib/kinds';
-import { dueLabel } from '@/lib/format';
+import { NODE_KINDS, NODE_TYPE_ORDER, PERIOD_TYPES, STATUS_LABEL } from '@/lib/kinds';
+import { dueLabel, money, shortDate, spanLabel } from '@/lib/format';
 import type { ChildRow, NodeType } from '@/lib/types';
 import Dropdown from '@/components/Dropdown';
 import EmptyState from '@/components/EmptyState';
@@ -136,7 +136,10 @@ export default function ChildrenSection({
                 const K = NODE_KINDS[row.type];
                 const due = status !== 'done' ? dueLabel(row.due_date) : null;
                 const pct = row.child_count ? Math.round((row.done_count / row.child_count) * 100) : 0;
-                const sub = row.done_criteria || row.cadence;
+                const when = row.start_date && PERIOD_TYPES.includes(row.type) ? spanLabel(row.start_date, row.due_date, row.type) : '';
+                const event = [row.event_date ? `Event ${shortDate(row.event_date)}` : '', row.location, row.cost !== null && row.cost !== undefined ? money(row.cost) : ''].filter(Boolean).join(' · ');
+                const detail = row.done_criteria ? `Done when: ${row.done_criteria}` : row.cadence;
+                const sub = [when, event, detail].filter(Boolean).join(' · ');
                 return (
                   <div key={row.id} className="trow">
                     <button
@@ -158,7 +161,7 @@ export default function ChildrenSection({
                       {(sub || mixed) && (
                         <span className="crit">
                           {mixed && <span style={{ color: 'var(--text-2)' }}>{K.label}{sub ? ' · ' : ''}</span>}
-                          {row.done_criteria ? `Done when: ${row.done_criteria}` : row.cadence}
+                          {sub}
                         </span>
                       )}
                     </Link>

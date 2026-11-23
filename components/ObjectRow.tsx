@@ -12,6 +12,7 @@ export default function ObjectRow({
   onClick,
   active,
   asButton = false,
+  sub,
 }: {
   item: ObjectRef;
   sectors: SectorLookup;
@@ -19,6 +20,7 @@ export default function ObjectRow({
   onClick?: () => void;
   active?: boolean;
   asButton?: boolean;
+  sub?: string; // replaces the kind and sector line
 }) {
   const Icon = kindIcon(item);
   const sector = item.sector_id ? sectors[item.sector_id] : undefined;
@@ -31,14 +33,20 @@ export default function ObjectRow({
       <span className="row-main">
         <span className={`row-title${item.status === 'done' ? ' done' : ''}`}>{item.title}</span>
         <span className="row-sub">
-          <span>{kindLabel(item)}</span>
-          {sector && item.object_type !== 'sector' && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, ['--c' as string]: colour }}>
-              <i className="swatch" aria-hidden />
-              {sector.name}
-            </span>
+          {sub ? (
+            <span>{sub}</span>
+          ) : (
+            <>
+              <span>{kindLabel(item)}</span>
+              {sector && item.object_type !== 'sector' && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, ['--c' as string]: colour }}>
+                  <i className="swatch" aria-hidden />
+                  {sector.name}
+                </span>
+              )}
+              {item.snippet && <span>{item.snippet}</span>}
+            </>
           )}
-          {item.snippet && <span>{item.snippet}</span>}
         </span>
       </span>
       {end}

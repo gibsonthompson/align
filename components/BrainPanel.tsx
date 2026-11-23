@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ArrowRight, BrainCircuit, Check, ChevronDown, Loader2, Plus, RotateCw, Send, X } from 'lucide-react';
 import { addFact, brainAccept, brainDismiss, brainRun, removeFact } from '@/app/actions';
 import { NODE_KINDS } from '@/lib/kinds';
-import { timeAgo } from '@/lib/format';
+import { shortDate, spanLabel, timeAgo } from '@/lib/format';
 import type { BrainMessage, BrainProposal, BrainReply, Fact, NodeType, ObjectType } from '@/lib/types';
 import EmptyState from '@/components/EmptyState';
 
@@ -402,6 +402,11 @@ export default function BrainPanel({
   );
 }
 
+function dates(p: BrainProposal): string {
+  if (p.start_date) return spanLabel(p.start_date, p.due_date ?? null, p.type);
+  return p.due_date ? `On ${shortDate(p.due_date)}` : '';
+}
+
 function ProposalCard({ p, draft, editable, onChange }: { p: BrainProposal; draft: Draft; editable: boolean; onChange: (patch: Partial<Draft>) => void }) {
   const K = NODE_KINDS[p.type];
   if (!draft) return null;
@@ -414,6 +419,7 @@ function ProposalCard({ p, draft, editable, onChange }: { p: BrainProposal; draf
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span className="tag">{K.label}</span>
+            {p.start_date || p.due_date ? <span className="tag">{dates(p)}</span> : null}
             <b style={{ fontWeight: 600 }}>{p.title}</b>
           </div>
           {p.done_criteria && <p className="pc-body">Done when: {p.done_criteria}</p>}
@@ -439,9 +445,12 @@ function ProposalCard({ p, draft, editable, onChange }: { p: BrainProposal; draf
         <Check size={12} strokeWidth={3.4} />
       </button>
       <div style={{ minWidth: 0 }}>
-        <span className="tag">
-          <K.Icon size={11} /> {K.label}
-        </span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span className="tag">
+            <K.Icon size={11} /> {K.label}
+          </span>
+          {p.start_date || p.due_date ? <span className="tag">{dates(p)}</span> : null}
+        </div>
         <textarea
           className="pc-title"
           rows={1}
