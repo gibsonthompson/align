@@ -1,8 +1,10 @@
 import Link from 'next/link';
-import { CalendarClock, Orbit } from 'lucide-react';
+import { CalendarClock, Orbit, Repeat } from 'lucide-react';
 import { getToday } from '@/lib/data';
+import { getHabits } from '@/lib/progress';
+import HabitItem from '@/components/progress/HabitItem';
 import { sectorLookup } from '@/lib/sectors';
-import { countdown, dueLabel, greeting, longToday, money, shortDate, spanLabel } from '@/lib/format';
+import { countdown, dueLabel, greeting, longToday, money, shortDate, spanLabel, todayISO } from '@/lib/format';
 import { clock, utcToZoned } from '@/lib/tz';
 import type { AlignNode, ObjectRef } from '@/lib/types';
 import TopBar from '@/components/TopBar';
@@ -42,11 +44,13 @@ function Event({ n }: { n: AlignNode }) {
 const eventSub = (n: AlignNode) => [shortDate(n.event_date), n.location, money(n.cost)].filter(Boolean).join(' · ');
 
 export default async function TodayPage() {
-  const t = await getToday();
+  const [t, habits] = await Promise.all([getToday(), getHabits()]);
+  const habitsToday = habits.filter((h) => !h.paused && (h.stat.dueToday || h.stat.doneToday));
+  const todayStr = todayISO();
   const lookup = sectorLookup(t.sectors);
   const coming = [...t.overdue, ...t.due];
   const nowMs = Date.now();
-  const nothing = !t.schedule.length && !t.pinned.length && !t.recent.length && !coming.length && !t.objectives.length && !t.periods.length && !t.events.length;
+  const nothing = !habitsToday.length && !t.schedule.length && !t.pinned.length && !t.recent.length && !coming.length && !t.objectives.length && !t.periods.length && !t.events.length;
 
   return (
     <>
@@ -89,6 +93,28 @@ export default async function TodayPage() {
         ) : (
           <div className="two-col">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2 className="panel-title">
+                    Habits Today{' '}
+                    <span className="count">
+                      {habitsToday.filter((h) => h.stat.doneToday).length}/{habitsToday.length}
+                    </span>
+                  </h2>
+                  <Link href="/progress" className="panel-note">
+                    Open Progress
+                  </Link>
+                </div>
+                {habitsToday.length ? (
+                  <div className="habit-list">
+                    {habitsToday.map((h) => (
+                      <HabitItem key={h.id} h={h} today={todayStr} sectors={lookup} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState Icon={Repeat} title={habits.length ? 'Nothing Due Today' : 'No Habits Yet'} body={habits.length ? 'Every habit is done or not scheduled today.' : 'Make a Weekly Commitment a habit and it gets a check-in here every day it is due.'} />
+                )}
+              </section>
               <section className="panel">
                 <div className="panel-head">
                   <h2 className="panel-title">

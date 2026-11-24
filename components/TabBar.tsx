@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CalendarDays, Images, NotebookPen, Orbit, Sun } from 'lucide-react';
+import { Activity, CalendarDays, NotebookPen, Orbit, Sun } from 'lucide-react';
 
 const TABS = [
   { href: '/', label: 'Today', Icon: Sun, match: (p: string) => p === '/' || p.startsWith('/search') },
   { href: '/life', label: 'Life', Icon: Orbit, match: (p: string) => p.startsWith('/life') || p.startsWith('/s/') || p.startsWith('/n/') },
   { href: '/calendar', label: 'Calendar', Icon: CalendarDays, match: (p: string) => p.startsWith('/calendar') },
-  { href: '/vision', label: 'Vision', Icon: Images, match: (p: string) => p.startsWith('/vision') },
+  { href: '/progress', label: 'Progress', Icon: Activity, match: (p: string) => p.startsWith('/progress') },
   { href: '/reviews', label: 'Reviews', Icon: NotebookPen, match: (p: string) => p.startsWith('/reviews') },
 ];
 

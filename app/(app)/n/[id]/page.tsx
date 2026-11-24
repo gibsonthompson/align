@@ -14,11 +14,19 @@ import LinksSection from '@/components/LinksSection';
 import NotesSection from '@/components/NotesSection';
 import ActivitySection from '@/components/ActivitySection';
 import NodeSchedule from '@/components/NodeSchedule';
+import HabitPanel from '@/components/progress/HabitPanel';
+import MeasuresPanel from '@/components/progress/MeasuresPanel';
+import { getNodeProgress } from '@/lib/progress';
+import { todayISO } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
 // Kinds that are done in a sitting, so they get a time on the calendar.
 const SCHEDULABLE = ['action', 'task', 'micro_goal', 'commitment', 'phase'];
+// Kinds that usually repeat, so they offer to become a habit.
+const HABIT_KINDS = ['commitment', 'micro_goal'];
+// Kinds that are outcomes, so they offer measures.
+const MEASURE_KINDS = ['vision', 'milestone', 'objective', 'month', 'week', 'commitment', 'project', 'micro_goal'];
 // The brain can take a while to think.
 export const maxDuration = 120;
 
@@ -39,6 +47,8 @@ export default async function NodePage({ params, searchParams }: { params: Promi
   if (!node.archived) await recordView('node', node.id).catch(() => {});
 
   const lookup = sectorLookup(page.allSectors);
+  const progress = await getNodeProgress(node.id);
+  const today = todayISO();
   const top = topSector(page.allSectors, node.sector_id);
   const K = NODE_KINDS[node.type];
   const allowed = nextTypes('node', node.type);
@@ -82,6 +92,12 @@ export default async function NodePage({ params, searchParams }: { params: Promi
                 emptyTitle={`No ${next.plural} Yet`}
                 emptyBody="Run the brain above to break this down, or add pages by hand below."
               />
+            )}
+            {(HABIT_KINDS.includes(node.type) || progress.habit) && (
+              <HabitPanel key={`h-${node.id}`} nodeId={node.id} habit={progress.habit} cadence={node.cadence} today={today} archived={node.archived} />
+            )}
+            {(MEASURE_KINDS.includes(node.type) || progress.measures.length > 0) && (
+              <MeasuresPanel key={`m-${node.id}`} nodeId={node.id} measures={progress.measures} today={today} sectors={lookup} archived={node.archived} />
             )}
             <NotesSection key={`t-${node.id}`} attached={{ type: 'node', id: node.id }} notes={page.notes} />
           </div>

@@ -9,11 +9,12 @@ import { hasSession } from '@/lib/auth';
 import { missingEnvNames } from '@/lib/env';
 import { createSession, SESSION_COOKIE, sessionCookieOptions } from '@/lib/session';
 import { cleanBody, cleanLink, cleanText, isId, slugify } from '@/lib/ids';
-import { addDaysISO, isISODate } from '@/lib/format';
+import { addDaysISO, isISODate, todayISO } from '@/lib/format';
+import { placeHabitSessions, type PlaceResult } from '@/lib/progress';
 import { zonedToUtc } from '@/lib/tz';
 import { BLOCK_COLS } from '@/lib/calendar';
 import { NODE_KINDS, PERIOD_TYPES, SECTOR_ICON_NAMES } from '@/lib/kinds';
-import type { ActionResult, AlignNode, Block, BlockStatus, BrainMessage, BrainProposal, BrainReply, NodeStatus, NodeType, ObjectRef, ObjectType, Relation, Sector } from '@/lib/types';
+import type { ActionResult, AlignNode, Block, BlockStatus, HabitSchedule, BrainMessage, BrainProposal, BrainReply, NodeStatus, NodeType, ObjectRef, ObjectType, Relation, Sector } from '@/lib/types';
 import { BrainError, brainModel, nextTypes, runBrain, type BrainTarget } from '@/lib/brain';
 
 const NODE_TYPES = Object.keys(NODE_KINDS) as NodeType[];
@@ -796,6 +797,189 @@ export async function deleteBlock(id: string): Promise<ActionResult> {
   if (!(await hasSession())) return err(SIGNED_OUT);
   if (!isId(id)) return err('That block is already gone.');
   const { error } = await db().from('align_blocks').delete().eq('id', id);
+  if (error) return err(dbError(error, 'Could not remove it. Try again.'));
+  refresh();
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Habits and measures
+// ---------------------------------------------------------------------------
+
+export interface HabitConfig {
+  schedule: HabitSchedule;
+  days?: number[];
+  per_week?: number | null;
+  minutes?: number | null;
+  window_start?: number | null;
+  window_end?: number | null;
+  auto_place?: boolean;
+  paused?: boolean;
+}
+
+function habitRow(c: HabitConfig): Record<string, unknown> | string {
+  if (!['daily', 'days', 'per_week'].includes(c.schedule)) return 'Pick how often.';
+  const days = [...new Set((c.days ?? []).map(Number).filter((d) => Number.isInteger(d) && d >= 1 && d <= 7))].sort();
+  if (c.schedule === 'days' && !days.length) return 'Pick at least one day.';
+  const per = c.per_week === null || c.per_week === undefined ? null : Number(c.per_week);
+  if (c.schedule === 'per_week' && !(per && Number.isInteger(per) && per >= 1 && per <= 7)) return 'Times a week is 1 to 7.';
+  const minutes = c.minutes === null || c.minutes === undefined ? null : Number(c.minutes);
+  if (minutes !== null && !(Number.isInteger(minutes) && minutes >= 5 && minutes <= 600)) return 'A session is 5 to 600 minutes.';
+  const ws = c.window_start ?? null;
+  const we = c.window_end ?? null;
+  if ((ws !== null && !(Number.isInteger(ws) && ws >= 0 && ws < 1440)) || (we !== null && !(Number.isInteger(we) && we > 0 && we <= 1440))) return 'That time window is not valid.';
+  if (ws !== null && we !== null && we <= ws) return 'The window has to end after it starts.';
+  return {
+    schedule: c.schedule,
+    days: c.schedule === 'days' ? days : [],
+    per_week: c.schedule === 'per_week' ? per : null,
+    minutes,
+    window_start: ws,
+    window_end: we,
+    ...(c.auto_place !== undefined ? { auto_place: Boolean(c.auto_place) } : {}),
+    ...(c.paused !== undefined ? { paused: Boolean(c.paused) } : {}),
+  };
+}
+
+export async function setHabit(nodeId: string, config: HabitConfig): Promise<ActionResult<{ id: string }>> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(nodeId)) return err('That page no longer exists.');
+  const row = habitRow(config);
+  if (typeof row === 'string') return err(row);
+  const { data, error } = await db().from('align_habits').upsert({ node_id: nodeId, ...row }, { onConflict: 'node_id' }).select('id').single();
+  if (error || !data) return err(dbError(error, 'Could not save the habit. Try again.'));
+  // A habit is ongoing, so it is something to do rather than something to break down.
+  await db().from('align_nodes').update({ actionable: true, brain_state: 'actionable' }).eq('id', nodeId).eq('actionable', false);
+  refresh();
+  return { ok: true, data: { id: data.id as string } };
+}
+
+export async function removeHabit(nodeId: string): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(nodeId)) return err('That page no longer exists.');
+  const { error } = await db().from('align_habits').delete().eq('node_id', nodeId);
+  if (error) return err(dbError(error, 'Could not remove the habit. Try again.'));
+  refresh();
+  return { ok: true };
+}
+
+// Sets one day's check-in: done, skipped, or cleared (null).
+export async function checkIn(habitId: string, day: string, status: 'done' | 'skipped' | null, amount?: number | null): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(habitId)) return err('That habit no longer exists.');
+  if (!isISODate(day)) return err('Pick a day.');
+  if (day > addDaysISO(todayISO(), 1)) return err('You can only check in for today or earlier.');
+  if (status === null) {
+    const { error } = await db().from('align_habit_logs').delete().eq('habit_id', habitId).eq('day', day);
+    if (error) return err(dbError(error, 'Could not clear it. Try again.'));
+  } else {
+    if (!['done', 'skipped'].includes(status)) return err('Unknown status.');
+    const a = amount === undefined || amount === null ? null : Number(amount);
+    if (a !== null && !Number.isFinite(a)) return err('That amount is not a number.');
+    const { error } = await db().from('align_habit_logs').upsert({ habit_id: habitId, day, status, amount: a, source: 'align' }, { onConflict: 'habit_id,day' });
+    if (error) return err(dbError(error, 'Could not check in. Try again.'));
+  }
+  refresh();
+  return { ok: true };
+}
+
+export async function placeHabits(weekAnchor: string, habitIds?: string[]): Promise<ActionResult<PlaceResult>> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isISODate(weekAnchor)) return err('Pick a week.');
+  try {
+    const res = await placeHabitSessions(weekAnchor, habitIds?.filter(isId));
+    refresh();
+    return { ok: true, data: res };
+  } catch {
+    return err('Could not place the habits. Try again.');
+  }
+}
+
+export interface MeasureInput {
+  nodeId?: string | null;
+  sectorId?: string | null;
+  name?: string;
+  unit?: string;
+  kind?: 'level' | 'total';
+  direction?: 'up' | 'down';
+  period?: 'week' | 'month' | 'all';
+  start_value?: number | null;
+  target_value?: number | null;
+  target_date?: string | null;
+}
+
+function measureRow(m: MeasureInput, creating: boolean): Record<string, unknown> | string {
+  const row: Record<string, unknown> = {};
+  if (m.name !== undefined || creating) {
+    const name = cleanText(m.name ?? '', 120);
+    if (!name) return 'Give the measure a name.';
+    row.name = name;
+  }
+  if (m.unit !== undefined) row.unit = cleanText(m.unit, 24);
+  if (m.kind !== undefined) {
+    if (!['level', 'total'].includes(m.kind)) return 'Unknown kind.';
+    row.kind = m.kind;
+  }
+  if (m.direction !== undefined) {
+    if (!['up', 'down'].includes(m.direction)) return 'Unknown direction.';
+    row.direction = m.direction;
+  }
+  if (m.period !== undefined) {
+    if (!['week', 'month', 'all'].includes(m.period)) return 'Unknown period.';
+    row.period = m.period;
+  }
+  for (const k of ['start_value', 'target_value'] as const) {
+    if (m[k] === undefined) continue;
+    if (m[k] !== null && !Number.isFinite(Number(m[k]))) return 'Values have to be numbers.';
+    row[k] = m[k] === null ? null : Number(m[k]);
+  }
+  if (m.target_date !== undefined) {
+    if (m.target_date !== null && m.target_date !== '' && !isISODate(m.target_date)) return 'That date is not valid.';
+    row.target_date = m.target_date || null;
+  }
+  if (m.nodeId !== undefined) row.node_id = m.nodeId && isId(m.nodeId) ? m.nodeId : null;
+  if (m.sectorId !== undefined && !row.node_id) row.sector_id = m.sectorId && isId(m.sectorId) ? m.sectorId : null;
+  return row;
+}
+
+export async function createMeasure(input: MeasureInput): Promise<ActionResult<{ id: string }>> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  const row = measureRow(input, true);
+  if (typeof row === 'string') return err(row);
+  const { data, error } = await db().from('align_measures').insert({ ...row, archived: false }).select('id').single();
+  if (error || !data) return err(dbError(error, 'Could not add the measure. Try again.'));
+  refresh();
+  return { ok: true, data: { id: data.id as string } };
+}
+
+export async function updateMeasure(id: string, patch: MeasureInput & { archived?: boolean }): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(id)) return err('That measure no longer exists.');
+  const row = measureRow(patch, false);
+  if (typeof row === 'string') return err(row);
+  if (patch.archived !== undefined) row.archived = Boolean(patch.archived);
+  if (!Object.keys(row).length) return { ok: true };
+  const { error } = await db().from('align_measures').update(row).eq('id', id);
+  if (error) return err(dbError(error, 'Could not save. Try again.'));
+  refresh();
+  return { ok: true };
+}
+
+export async function logMeasure(measureId: string, day: string, value: number, note?: string): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(measureId)) return err('That measure no longer exists.');
+  if (!isISODate(day)) return err('Pick a day.');
+  if (!Number.isFinite(Number(value))) return err('Enter a number.');
+  const { error } = await db().from('align_measure_logs').insert({ measure_id: measureId, day, value: Number(value), note: cleanText(note ?? '', 2000) });
+  if (error) return err(dbError(error, 'Could not log it. Try again.'));
+  refresh();
+  return { ok: true };
+}
+
+export async function deleteMeasureLog(id: string): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(id)) return err('That entry is already gone.');
+  const { error } = await db().from('align_measure_logs').delete().eq('id', id);
   if (error) return err(dbError(error, 'Could not remove it. Try again.'));
   refresh();
   return { ok: true };

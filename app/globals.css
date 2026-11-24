@@ -3604,3 +3604,554 @@ a.stat:hover {
     display: inline;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Progress: habits and measures
+   ------------------------------------------------------------------------- */
+
+.stat-value.good {
+  color: var(--green);
+}
+
+.progress-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.habit-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.habit {
+  padding: 11px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.habit:first-child {
+  border-top: 0;
+}
+
+.habit[data-paused='true'] {
+  opacity: 0.6;
+}
+
+.habit-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.habit-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.habit-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.habit-title:hover {
+  text-decoration: underline;
+}
+
+.habit-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.habit-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.habit-week {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.habit-bar {
+  position: relative;
+  width: 56px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.habit-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: var(--c);
+}
+
+.habit[data-full='true'] .heat {
+  margin: 10px 0 0 34px;
+}
+
+/* The check-in grid. */
+.heat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.heat-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  max-width: 560px;
+}
+
+.heat-dow {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-3);
+  line-height: 11px;
+}
+
+.heat-cell {
+  display: inline-block;
+  width: 100%;
+  min-width: 9px;
+  height: 11px;
+  border-radius: 2.5px;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  padding: 0;
+}
+
+i.heat-cell {
+  width: 11px;
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+
+button.heat-cell:not(:disabled) {
+  cursor: pointer;
+}
+
+button.heat-cell:not(:disabled):hover {
+  outline: 1px solid var(--text-2);
+  outline-offset: 1px;
+}
+
+.heat-cell[data-k='done'] {
+  background: var(--green);
+}
+
+.heat-cell[data-k='skipped'] {
+  background: transparent;
+  border: 1px dashed var(--text-3);
+}
+
+.heat-cell[data-k='missed'] {
+  background: color-mix(in srgb, var(--red) 18%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+.heat-cell[data-k='off'],
+.heat-cell[data-k='before'] {
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.heat-cell[data-k='future'] {
+  background: transparent;
+}
+
+.heat-cell[data-today='true'] {
+  box-shadow: 0 0 0 1px var(--text);
+}
+
+.heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+
+/* Habit panel on a page. */
+.hp-stats {
+  margin-bottom: 16px;
+}
+
+.hp-stats .stat {
+  padding: 12px 14px;
+}
+
+.hp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hp-form .field {
+  margin-bottom: 0;
+}
+
+.hp-days {
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.hp-switches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hp-switches > :only-child {
+  grid-column: 1 / -1;
+}
+
+.hp-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.hp-switch > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+}
+
+/* Measures. */
+.mpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mpanel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.mpanel .mpanel-head {
+  margin-bottom: 0;
+}
+
+.mgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.mgrid[data-odd='true'] > :last-child {
+  grid-column: 1 / -1;
+}
+
+.mcard-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcard-page {
+  display: block;
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcard-page:hover {
+  color: var(--text);
+}
+
+.mcard-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mcard-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 14px 14px 0;
+}
+
+.mcard-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.mcard-value {
+  font-size: 26px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.mcard-side {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  text-align: right;
+}
+
+.mcard-target {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mcard-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 0;
+}
+
+.mcard-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.mcard-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: var(--c);
+}
+
+.mcard-chart {
+  padding: 12px 6px 0 0;
+}
+
+.mcard-log {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+}
+
+.mcard-note {
+  grid-column: 1 / -1;
+}
+
+.mcard-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcard-entries {
+  border-top: 1px solid var(--line);
+}
+
+.mcard-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.mcard-toggle:hover {
+  color: var(--text);
+}
+
+.mcard-entry {
+  display: grid;
+  grid-template-columns: 64px auto minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px 5px 14px;
+  font-size: 12.5px;
+  border-top: 1px solid var(--line);
+}
+
+.mcard-entry-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Measure chart: thin line, recessive grid, dashed target, hover readout. */
+.mchart {
+  position: relative;
+  width: 100%;
+}
+
+.mchart svg {
+  display: block;
+  overflow: visible;
+}
+
+.mchart-empty {
+  display: grid;
+  place-items: center;
+  font-size: 12.5px;
+  color: var(--text-3);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-sm);
+  margin: 0 8px 0 14px;
+}
+
+.mchart-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.mchart-axis {
+  fill: var(--text-3);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.mchart-target {
+  stroke: var(--text-2);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.mchart-target-label {
+  fill: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.mchart-line {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.mchart-dot {
+  fill: var(--c);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+
+.mchart-focus {
+  fill: var(--c);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+
+.mchart-cross {
+  stroke: var(--text-3);
+  stroke-width: 1;
+}
+
+.mchart-bar {
+  fill: color-mix(in srgb, var(--c) 55%, var(--panel-2));
+}
+
+.mchart-bar[data-hit='true'] {
+  fill: var(--c);
+}
+
+.mchart-bar[data-hover='true'] {
+  fill: var(--text);
+}
+
+.mchart-tip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.mchart-tip span {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+@media (max-width: 980px) {
+  .mgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .habit-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+  .habit-stats {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+  .habit[data-full='true'] .heat {
+    margin-left: 0;
+  }
+  .hp-switches {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcard-log {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .mcard-log input[type='date'] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.mcard-value {
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .progress-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

@@ -3,6 +3,7 @@ import { History } from 'lucide-react';
 import { hrefFor, NODE_KINDS, relationLabel, STATUS_LABEL } from '@/lib/kinds';
 import { money, shortDate, timeAgo } from '@/lib/format';
 import { clock, utcToZoned } from '@/lib/tz';
+import { fmtValue } from '@/lib/habits';
 import type { Activity, NodeStatus, NodeType, ObjectRef, Relation } from '@/lib/types';
 import EmptyState from '@/components/EmptyState';
 
@@ -110,6 +111,22 @@ function describe(r: Row): { text: React.ReactNode; tone: 'plain' | 'strong' | '
         tone: r.action === 'session_done' ? 'good' : 'plain',
       };
     }
+    case 'habit_done':
+      return { text: <>Checked in for {d.day ? shortDate(d.day) : 'the day'}{d.amount ? `, ${d.amount}` : ''}</>, tone: 'good' };
+    case 'habit_skipped':
+      return { text: <>Skipped {d.day ? shortDate(d.day) : 'a day'}</>, tone: 'plain' };
+    case 'habit_cleared':
+      return { text: <>Check-in cleared for {d.day ? shortDate(d.day) : 'a day'}</>, tone: 'plain' };
+    case 'measured':
+      return {
+        text: (
+          <>
+            {d.name}: <b>{fmtValue(Number(d.value), d.unit ?? '')}</b>
+            {d.day ? ` on ${shortDate(d.day)}` : ''}
+          </>
+        ),
+        tone: 'plain',
+      };
     case 'event':
       return {
         text: (

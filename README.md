@@ -27,6 +27,7 @@ Migrations live in `supabase/migrations` and are already applied to Detail Pro:
 - `0002_align_tree_ops.sql`: sector counts, archive or restore a page with its branch, move a page with its branch
 - `0003_align_brain.sql`: done criteria, effort, cadence and actionable on pages; the brain's conversation per page; facts it learns about Gibson
 - `0004_align_chatgpt.sql`: OAuth clients, codes and tokens for the ChatGPT connection; marks history rows written by ChatGPT
+- `0007_align_habits_measures.sql`: habits (a schedule on a page) with daily check-ins, measures (numbers over time, for a goal) with entries, and finishing a calendar block checks in its habit
 - `0006_align_calendar.sql`: calendar blocks (a time slot, optionally for a page), their history on the page, and finishing a block finishes its action
 - `0005_align_months_weeks_events.sql`: Month and Week page kinds (end dates fill themselves in), event date, location, cost and link on any page, shifting a plan's dates, and ended weeks no longer counting as overdue
 
@@ -41,7 +42,7 @@ RLS is on for every `align_` table with deny-all policies for `anon` and `authen
 1. Skeleton of a life plus the brain (this): login, sectors and areas, five-plus levels of pages, links, notes, history, search, quick switcher, the planning brain
 2. Vision and assessment
 3. Deeper reverse engineering: realism checks on timelines and effort
-4. Habits and measures
+4. Habits and measures (built): schedules, check-ins, streaks, placing habit sessions on the calendar, measures with charts and goal progress, ChatGPT tools for all of it. Nutrition and the Forward Fitness link build on this next
 5. Calendar: day (15-minute slots), week and month views, drag to create, move and resize, To Schedule, time by sector, ChatGPT time slots (built). Still to come: auto-scheduling, habit slots, Google Calendar sync
 6. Vision board, gallery and the HQ import
 7. Reviews

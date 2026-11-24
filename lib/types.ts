@@ -198,3 +198,58 @@ export interface Block {
   // From the linked page, when there is one.
   node?: { id: string; title: string; type: NodeType; status: NodeStatus; effort_minutes: number | null; done_criteria: string } | null;
 }
+
+// A page with a schedule that gets a check-in each day it happens.
+export type HabitSchedule = 'daily' | 'days' | 'per_week';
+
+export interface Habit {
+  id: string;
+  node_id: string;
+  schedule: HabitSchedule;
+  days: number[]; // 1 Monday to 7 Sunday
+  per_week: number | null;
+  minutes: number | null;
+  window_start: number | null;
+  window_end: number | null;
+  auto_place: boolean;
+  paused: boolean;
+  started_on: string;
+}
+
+export interface HabitLog {
+  id: string;
+  habit_id: string;
+  day: string;
+  status: 'done' | 'skipped';
+  amount: number | null;
+  note: string;
+  source: string;
+}
+
+// A number tracked over time, optionally for a goal page.
+export interface Measure {
+  id: string;
+  node_id: string | null;
+  sector_id: string | null;
+  name: string;
+  unit: string;
+  kind: 'level' | 'total';
+  direction: 'up' | 'down';
+  period: 'week' | 'month' | 'all';
+  start_value: number | null;
+  target_value: number | null;
+  target_date: string | null;
+  archived: boolean;
+  sort: number;
+  created_at: string;
+}
+
+export interface MeasureLog {
+  id: string;
+  measure_id: string;
+  day: string;
+  value: number;
+  note: string;
+  source: string;
+  created_at: string;
+}

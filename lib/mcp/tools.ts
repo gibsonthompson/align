@@ -4,6 +4,8 @@ import { isId, cleanBody, cleanLink, cleanText, slugify } from '@/lib/ids';
 import { isISODate, todayISO, addDaysISO } from '@/lib/format';
 import { NODE_KINDS, PERIOD_TYPES } from '@/lib/kinds';
 import { hhmm, parseClock, TZ, utcToZoned, zonedToUtc } from '@/lib/tz';
+import { getHabits, getMeasures, placeHabitSessions, type HabitRow, type MeasureRow } from '@/lib/progress';
+import { scheduleLabel } from '@/lib/habits';
 import type { NodeType, NodeStatus, Relation, Sector } from '@/lib/types';
 
 // The tools ChatGPT gets in Align. Read tools are marked read-only; everything
@@ -886,6 +888,190 @@ async function deleteBlockTool(a: Args) {
 }
 
 // ---------------------------------------------------------------------------
+// Habits and measures
+// ---------------------------------------------------------------------------
+
+function habitOut(h: HabitRow, ctx: Ctx) {
+  return {
+    habit_id: h.id,
+    page_id: h.node_id,
+    title: h.node.title,
+    schedule: scheduleLabel(h),
+    ...(h.window_start !== null ? { window: `${hhmm(h.window_start)} to ${hhmm(h.window_end ?? 1440)}` } : {}),
+    paused: h.paused,
+    this_week: `${h.stat.weekDone} of ${h.stat.weekTarget}`,
+    due_today: h.stat.dueToday,
+    done_today: h.stat.doneToday,
+    streak: `${h.stat.streak} ${h.stat.streakUnit}${h.stat.streak === 1 ? '' : 's'}`,
+    ...(h.stat.rate !== null ? { last_4_weeks: `${Math.round(h.stat.rate * 100)}%` } : {}),
+    last_14_days: Array.from({ length: 14 }, (_, i) => addDaysISO(todayISO(), -13 + i)).map((d) => {
+      const l = h.logs.find((x) => x.day === d);
+      return `${d}:${l ? l.status : '-'}`;
+    }),
+    url: url(ctx, 'node', h.node_id),
+  };
+}
+
+function measureOut(m: MeasureRow, ctx: Ctx) {
+  const recent = [...m.logs].sort((a, b) => b.day.localeCompare(a.day)).slice(0, 12);
+  return {
+    measure_id: m.id,
+    name: m.name,
+    unit: m.unit,
+    kind: m.kind,
+    ...(m.kind === 'level' ? { better: m.direction === 'up' ? 'higher' : 'lower' } : { counts_per: m.period }),
+    current: { label: m.stat.periodLabel, value: m.stat.current },
+    ...(m.start_value !== null ? { start_value: m.start_value } : {}),
+    ...(m.target_value !== null ? { target_value: m.target_value } : {}),
+    ...(m.target_date ? { target_date: m.target_date } : {}),
+    ...(m.stat.progress !== null ? { progress: `${Math.round(m.stat.progress * 100)}%` } : {}),
+    ...(m.stat.onTrack !== null ? { on_track: m.stat.onTrack } : {}),
+    ...(m.node ? { page_id: m.node.id, page: m.node.title, url: url(ctx, 'node', m.node.id) } : {}),
+    recent_entries: recent.map((l) => ({ day: l.day, value: l.value, ...(l.note ? { note: l.note } : {}) })),
+  };
+}
+
+async function getProgressTool(a: Args, ctx: Ctx) {
+  const [habits, measures] = await Promise.all([getHabits(), getMeasures()]);
+  const forPage = a.page_id ? String(a.page_id) : null;
+  return {
+    today: todayISO(),
+    habits: habits.filter((h) => !forPage || h.node_id === forPage).map((h) => habitOut(h, ctx)),
+    measures: measures.filter((m) => !forPage || m.node_id === forPage).map((m) => measureOut(m, ctx)),
+  };
+}
+
+async function setHabitTool(a: Args, ctx: Ctx) {
+  const n = await nodeById(a.page_id);
+  const schedule = String(a.schedule ?? '');
+  if (!['daily', 'days', 'per_week'].includes(schedule)) throw new ToolError('schedule is "daily", "days" (with days) or "per_week" (with times_per_week).');
+  const DAYS: Record<string, number> = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
+  const days = Array.isArray(a.days) ? (a.days as unknown[]).map((d) => (typeof d === 'number' ? d : DAYS[String(d).slice(0, 3).toLowerCase()])).filter((d) => Number.isInteger(d) && d >= 1 && d <= 7) : [];
+  if (schedule === 'days' && !days.length) throw new ToolError('days needs at least one day, like ["mon", "wed", "fri"].');
+  const per = a.times_per_week === undefined ? null : Number(a.times_per_week);
+  if (schedule === 'per_week' && !(per && Number.isInteger(per) && per >= 1 && per <= 7)) throw new ToolError('times_per_week is 1 to 7.');
+  const minutes = a.minutes === undefined || a.minutes === null ? null : Number(a.minutes);
+  if (minutes !== null && !(Number.isInteger(minutes) && minutes >= 5 && minutes <= 600)) throw new ToolError('minutes is 5 to 600.');
+  const ws = a.earliest === undefined || a.earliest === null ? null : parseClock(a.earliest);
+  const we = a.latest_end === undefined || a.latest_end === null ? null : parseClock(a.latest_end);
+  if ((a.earliest && ws === null) || (a.latest_end && we === null)) throw new ToolError('earliest and latest_end are times like "06:00" and "09:00".');
+  if (ws !== null && we !== null && we <= ws) throw new ToolError('latest_end has to be after earliest.');
+  const since = new Date().toISOString();
+  const { error } = await db()
+    .from('align_habits')
+    .upsert(
+      {
+        node_id: n.id,
+        schedule,
+        days: schedule === 'days' ? [...new Set(days)].sort() : [],
+        per_week: schedule === 'per_week' ? per : null,
+        minutes,
+        window_start: ws,
+        window_end: we,
+        auto_place: a.place_on_calendar === true,
+        paused: a.paused === true,
+      },
+      { onConflict: 'node_id' },
+    );
+  if (error) throw new ToolError('Could not save the habit.');
+  await db().from('align_nodes').update({ actionable: true, brain_state: 'actionable' }).eq('id', n.id);
+  await tagVia(since);
+  const [h] = (await getHabits()).filter((x) => x.node_id === n.id);
+  return { habit: h ? habitOut(h, ctx) : { page_id: n.id } };
+}
+
+async function checkInTool(a: Args, ctx: Ctx) {
+  const habits = await getHabits();
+  const h = habits.find((x) => x.id === a.habit_id || x.node_id === a.page_id);
+  if (!h) throw new ToolError('No habit found. Pass habit_id or the page_id of a page that is a habit (see get_progress).');
+  const day = (date(a.day, 'day') ?? todayISO()) as string;
+  if (day > todayISO()) throw new ToolError('You can only check in for today or earlier.');
+  const status = a.status === undefined ? 'done' : String(a.status);
+  const since = new Date().toISOString();
+  if (status === 'clear') {
+    await db().from('align_habit_logs').delete().eq('habit_id', h.id).eq('day', day);
+  } else {
+    if (!['done', 'skipped'].includes(status)) throw new ToolError('status is done, skipped or clear.');
+    const amount = a.amount === undefined || a.amount === null ? null : Number(a.amount);
+    if (amount !== null && !Number.isFinite(amount)) throw new ToolError('amount must be a number.');
+    const { error } = await db()
+      .from('align_habit_logs')
+      .upsert({ habit_id: h.id, day, status, amount, note: str(a.note, 2000, 'note') ?? '', source: 'chatgpt' }, { onConflict: 'habit_id,day' });
+    if (error) throw new ToolError('Could not check in.');
+  }
+  await tagVia(since);
+  const [fresh] = (await getHabits()).filter((x) => x.id === h.id);
+  return { habit: habitOut(fresh ?? h, ctx) };
+}
+
+async function createMeasureTool(a: Args, ctx: Ctx) {
+  const name = str(a.name, 120, 'name', true)!;
+  const kind = a.kind === 'total' ? 'total' : 'level';
+  const period = kind === 'total' ? (['week', 'month', 'all'].includes(String(a.counts_per)) ? String(a.counts_per) : 'week') : 'all';
+  const n = a.page_id ? await nodeById(a.page_id) : null;
+  const sector = !n && a.sector_slug ? await sectorBySlug(a.sector_slug) : null;
+  const numOrNull = (v: unknown, f: string) => {
+    if (v === undefined || v === null || v === '') return null;
+    const x = Number(v);
+    if (!Number.isFinite(x)) throw new ToolError(`${f} must be a number.`);
+    return x;
+  };
+  const row = {
+    name,
+    unit: str(a.unit, 24, 'unit') ?? '',
+    kind,
+    direction: a.better === 'lower' ? 'down' : 'up',
+    period,
+    start_value: kind === 'level' ? numOrNull(a.start_value, 'start_value') : null,
+    target_value: numOrNull(a.target_value, 'target_value'),
+    target_date: date(a.target_date, 'target_date') ?? null,
+    node_id: n?.id ?? null,
+    sector_id: sector?.id ?? null,
+    archived: false,
+  };
+  const since = new Date().toISOString();
+  const { data, error } = await db().from('align_measures').insert(row).select('id').single();
+  if (error || !data) throw new ToolError('Could not add the measure.');
+  if (Array.isArray(a.entries) && a.entries.length) {
+    const entries = (a.entries as { day?: unknown; value?: unknown; note?: unknown }[]).slice(0, 200).map((e, i) => {
+      if (!isISODate(e.day) || !Number.isFinite(Number(e.value))) throw new ToolError(`entries[${i}] needs a day (YYYY-MM-DD) and a numeric value.`);
+      return { measure_id: data.id, day: e.day, value: Number(e.value), note: str(e.note, 2000, 'note') ?? '', source: 'chatgpt' };
+    });
+    await db().from('align_measure_logs').insert(entries);
+  }
+  await tagVia(since);
+  const [m] = (await getMeasures()).filter((x) => x.id === data.id);
+  return { measure: m ? measureOut(m, ctx) : { measure_id: data.id } };
+}
+
+async function logMeasureTool(a: Args, ctx: Ctx) {
+  const measures = await getMeasures();
+  const m = measures.find((x) => x.id === a.measure_id) ?? (a.name ? measures.find((x) => x.name.toLowerCase() === String(a.name).toLowerCase()) : undefined);
+  if (!m) throw new ToolError(`No measure found. Pass measure_id or the exact name. Existing: ${measures.map((x) => x.name).join(', ') || 'none'}.`);
+  const value = Number(a.value);
+  if (!Number.isFinite(value)) throw new ToolError('value must be a number.');
+  const day = (date(a.day, 'day') ?? todayISO()) as string;
+  const since = new Date().toISOString();
+  const { error } = await db().from('align_measure_logs').insert({ measure_id: m.id, day, value, note: str(a.note, 2000, 'note') ?? '', source: 'chatgpt' });
+  if (error) throw new ToolError('Could not log it.');
+  await tagVia(since);
+  const [fresh] = (await getMeasures()).filter((x) => x.id === m.id);
+  return { measure: measureOut(fresh ?? m, ctx) };
+}
+
+async function placeHabitsTool(a: Args) {
+  const week = (date(a.week_of, 'week_of') ?? todayISO()) as string;
+  const ids = Array.isArray(a.habit_ids) ? (a.habit_ids as unknown[]).filter(isId) as string[] : undefined;
+  const since = new Date().toISOString();
+  const res = await placeHabitSessions(week, ids, 'chatgpt');
+  await tagVia(since);
+  return {
+    placed: res.placed.map((p) => ({ habit: p.habit, date: p.date, start: hhmm(p.start), end: hhmm(p.end), block_id: p.blockId })),
+    not_placed: res.skipped,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Definitions
 // ---------------------------------------------------------------------------
 
@@ -1054,6 +1240,102 @@ export const TOOLS: {
     },
     annotations: WRITE,
     run: updateBlockTool,
+  },
+  {
+    name: 'get_progress',
+    title: 'Habits and measures',
+    description:
+      'Every habit (schedule, this week done vs target, due and done today, streak, 4-week rate, last 14 days) and every measure (current value, start, target, progress, on track, recent entries). Pass page_id for one page only. Call it before answering how Gibson is doing, and before adjusting a plan.',
+    inputSchema: { type: 'object', properties: { page_id: { type: 'string' } } },
+    annotations: READ,
+    run: getProgressTool,
+  },
+  {
+    name: 'set_habit',
+    title: 'Make a page a habit',
+    description:
+      'Turn a page (usually a weekly commitment) into a habit with a schedule, or change its schedule: "daily", "days" with days like ["mon","wed","fri"], or "per_week" with times_per_week. Optional minutes per session, a time window (earliest, latest_end as HH:MM), place_on_calendar, paused.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        schedule: { type: 'string', enum: ['daily', 'days', 'per_week'] },
+        days: { type: 'array', items: { type: 'string' } },
+        times_per_week: { type: 'integer', minimum: 1, maximum: 7 },
+        minutes: { type: 'integer', minimum: 5, maximum: 600 },
+        earliest: { type: 'string', description: 'HH:MM' },
+        latest_end: { type: 'string', description: 'HH:MM' },
+        place_on_calendar: { type: 'boolean' },
+        paused: { type: 'boolean' },
+      },
+      required: ['page_id', 'schedule'],
+    },
+    annotations: WRITE,
+    run: setHabitTool,
+  },
+  {
+    name: 'check_in',
+    title: 'Check in a habit',
+    description: 'Record a habit for a day (default today): status "done" (default), "skipped", or "clear" to undo. Optional amount (e.g. minutes or reps) and note. Use habit_id or the habit page_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        habit_id: { type: 'string' },
+        page_id: { type: 'string' },
+        day: { type: 'string', description: 'YYYY-MM-DD, default today' },
+        status: { type: 'string', enum: ['done', 'skipped', 'clear'] },
+        amount: { type: 'number' },
+        note: { type: 'string' },
+      },
+    },
+    annotations: WRITE,
+    run: checkInTool,
+  },
+  {
+    name: 'create_measure',
+    title: 'Add a measure',
+    description:
+      'Start tracking a number. kind "level" when the latest value is what matters (body weight, savings balance, mile pace; set better to "higher" or "lower"), or "total" when entries add up (miles run, hours practiced; set counts_per to week, month or all). Attach it to a goal page with page_id so the goal shows progress, or to a sector with sector_slug. Optional start_value, target_value, target_date and past entries [{day, value, note}].',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        unit: { type: 'string', description: 'lb, mi, min/mi, $, songs' },
+        kind: { type: 'string', enum: ['level', 'total'] },
+        better: { type: 'string', enum: ['higher', 'lower'] },
+        counts_per: { type: 'string', enum: ['week', 'month', 'all'] },
+        start_value: { type: 'number' },
+        target_value: { type: 'number' },
+        target_date: { type: 'string' },
+        page_id: { type: 'string' },
+        sector_slug: { type: 'string' },
+        entries: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['name', 'kind'],
+    },
+    annotations: WRITE,
+    run: createMeasureTool,
+  },
+  {
+    name: 'log_measure',
+    title: 'Log a measure',
+    description: 'Add an entry to a measure (by measure_id or exact name): a value for a day (default today) with an optional note. For "did my run, 3.2 miles", log 3.2 to the miles measure and check in the run habit.',
+    inputSchema: {
+      type: 'object',
+      properties: { measure_id: { type: 'string' }, name: { type: 'string' }, value: { type: 'number' }, day: { type: 'string' }, note: { type: 'string' } },
+      required: ['value'],
+    },
+    annotations: WRITE,
+    run: logMeasureTool,
+  },
+  {
+    name: 'place_habits',
+    title: 'Place habit sessions',
+    description:
+      'Put each habit\'s remaining sessions for a week (week_of any date in it, default this week) into free calendar time inside the habit\'s time window, spread across the week, never on top of other blocks. Optionally only some habit_ids. Returns what was placed and what could not fit.',
+    inputSchema: { type: 'object', properties: { week_of: { type: 'string' }, habit_ids: { type: 'array', items: { type: 'string' } } } },
+    annotations: WRITE,
+    run: placeHabitsTool,
   },
   {
     name: 'delete_block',
@@ -1232,5 +1514,7 @@ How to work in Align:
 - When something slips, use shift_dates or update_pages to re-date what is left rather than leaving it overdue.
 - Dates say which day; the calendar says when. To give work an actual time, call get_calendar for free gaps and then schedule_blocks with the page_id of each action. Put sessions where they fit his life (runs in the morning if he prefers, nothing on top of existing blocks, rest days kept free) and keep each block the length of the action's effort_minutes. Times are always America/New_York.
 - When he says he did something, mark its block done with update_block (that also marks the action done), or update_page if it had no block.
+- Ongoing commitments (run 3 times a week, practice guitar daily) should be habits: create the weekly commitment page, then set_habit with its schedule, minutes and time window. Use place_habits to put the week's sessions on the calendar. When he reports doing one, check_in (finishing its calendar block also checks it in).
+- Every goal that has a number gets a measure (body weight, miles a week, savings, songs learned) attached to the goal page with create_measure, with a start and target when known. Log entries with log_measure whenever he reports a number. Before judging how he is doing or changing a plan, read get_progress.
 - After writing, share the page links so he can open them in Align.
 - Style for anything you write into Align: plain and specific, sentence case titles, no em dashes, never the words "tackle" or "tackling".`;

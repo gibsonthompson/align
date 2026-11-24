@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import { createBlock, deleteBlock, updateBlock, updateNode } from '@/app/actions';
+import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Loader2, Plus, Repeat } from 'lucide-react';
+import { createBlock, deleteBlock, placeHabits, updateBlock, updateNode } from '@/app/actions';
 import { addDaysISO } from '@/lib/format';
 import { clock, duration, nowZoned, zonedToUtc } from '@/lib/tz';
 import { sectorLookup } from '@/lib/sectors';
@@ -46,6 +46,7 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
   const [dragPage, setDragPage] = useState<DragPage | null>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<Toast>(null);
+  const [placing, setPlacing] = useState(false);
   const toastTimer = useRef<number | null>(null);
   const nowMin = useNowMinute(nowZoned().minutes);
 
@@ -314,6 +315,26 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
               </button>
             ))}
           </div>
+          {view !== 'month' && to >= today && (
+            <button
+              type="button"
+              className="btn"
+              disabled={placing}
+              title="Put this week's habit sessions into free time"
+              onClick={async () => {
+                setPlacing(true);
+                const res = await placeHabits(anchor);
+                setPlacing(false);
+                if (!res.ok) return say({ text: res.error, tone: 'error' });
+                const n = res.data?.placed.length ?? 0;
+                const miss = res.data?.skipped.filter((s) => s.reason.startsWith('No free')).length ?? 0;
+                say({ text: n ? `Placed ${n} habit ${n === 1 ? 'session' : 'sessions'}${miss ? `, ${miss} could not fit` : ''}` : miss ? `${miss} habit ${miss === 1 ? 'session' : 'sessions'} could not fit` : 'Habits are already on track or booked this week' });
+                router.refresh();
+              }}
+            >
+              {placing ? <Loader2 size={14} className="spin" /> : <Repeat size={14} />} Place Habits
+            </button>
+          )}
           <button
             type="button"
             className="btn primary"
