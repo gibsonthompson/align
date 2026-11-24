@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { CalendarPlus, ChevronLeft, ChevronRight, GripVertical, ListChecks, PieChart } from 'lucide-react';
-import { addDaysISO, dueLabel, mondayOf } from '@/lib/format';
+import { CalendarDays, CalendarPlus, CalendarRange, ChevronLeft, ChevronRight, GripVertical, ListChecks, PieChart } from 'lucide-react';
+import { addDaysISO, dueLabel, mondayOf, spanLabel } from '@/lib/format';
 import { duration } from '@/lib/tz';
 import type { CalendarNode } from '@/lib/calendar';
 import type { Sector } from '@/lib/types';
@@ -24,6 +24,7 @@ export default function CalendarSide({
   onSchedule,
   onDragPage,
   hint,
+  periods,
 }: {
   anchor: string;
   today: string;
@@ -37,10 +38,37 @@ export default function CalendarSide({
   onSchedule: (n: CalendarNode) => void;
   onDragPage: (p: DragPage | null) => void;
   hint: string;
+  periods: CalendarNode[];
 }) {
   return (
     <aside className="cal-side">
       <MiniMonth anchor={anchor} today={today} from={from} to={to} blocks={blocks} onPick={onPick} />
+      {periods.length > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">
+              In Your Plans <span className="count">{periods.length}</span>
+            </h2>
+          </div>
+          <div className="ts-list">
+            {periods.map((p) => {
+              const Icon = p.type === 'month' ? CalendarDays : CalendarRange;
+              return (
+                <Link key={p.id} href={`/n/${p.id}`} className="ts-item plan-item" data-done={p.status === 'done'} style={{ ['--c' as string]: p.sector_id ? (lookup[p.sector_id]?.colour ?? '#8a8a8a') : '#8a8a8a' }}>
+                  <Icon size={14} className="plan-icon" />
+                  <div className="ts-main">
+                    <span className="ts-title">{p.title}</span>
+                    <span className="ts-sub">
+                      <span className="mono">{p.type === 'month' ? 'Month' : 'Week'}</span>
+                      <span>{spanLabel(p.start_date, p.due_date, p.type)}</span>
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <section className="panel">
         <div className="panel-head">
           <h2 className="panel-title">

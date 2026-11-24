@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Loader2, Plus, Repeat } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Plus, Repeat } from 'lucide-react';
 import { createBlock, deleteBlock, placeHabits, updateBlock, updateNode } from '@/app/actions';
 import { addDaysISO } from '@/lib/format';
 import { clock, duration, nowZoned, zonedToUtc } from '@/lib/tz';
 import { sectorLookup } from '@/lib/sectors';
-import { NODE_KINDS } from '@/lib/kinds';
 import type { CalendarData, CalendarNode, CalendarView } from '@/lib/calendar';
 import type { Block, NodeType } from '@/lib/types';
 import TimeGrid, { useNowMinute } from '@/components/calendar/TimeGrid';
+import MenuButton from '@/components/MenuButton';
 import MonthGrid from '@/components/calendar/MonthGrid';
 import CalendarSide from '@/components/calendar/CalendarSide';
 import BlockSheet from '@/components/calendar/BlockSheet';
@@ -287,8 +287,10 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
   const periods = data.periods.filter((p) => p.status !== 'done' || view !== 'day');
 
   return (
-    <div className="cal">
-      <div className="cal-bar">
+    <>
+      {/* The calendar's controls live in the top bar, so the grid gets the height. */}
+      <header className="top cal-top">
+        <MenuButton />
         <div className="cal-nav">
           <button type="button" className="btn" onClick={() => go(view, today)} disabled={isCurrent} title="Today (T)">
             Today
@@ -311,7 +313,7 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
             </span>
           )}
         </div>
-        <div className="cal-tools">
+        <div className="cal-tools top-actions">
           <div className="segmented cal-views" role="group" aria-label="Calendar view">
             {VIEWS.map((v) => (
               <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => go(v.value, anchor)} title={`${v.label} (${v.key})`}>
@@ -352,24 +354,9 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
             <Plus size={14} /> New Block
           </button>
         </div>
-      </div>
-
-      {periods.length > 0 && (
-        <div className="cal-periods">
-          <span className="cal-periods-label">In your plans</span>
-          {periods.map((p) => {
-            const Icon = p.type === 'month' ? CalendarDays : CalendarRange;
-            return (
-              <Link key={p.id} href={`/n/${p.id}`} className="chip period" data-done={p.status === 'done'} style={{ ['--c' as string]: p.sector_id ? (lookup[p.sector_id]?.colour ?? '#8a8a8a') : '#8a8a8a' }}>
-                <Icon size={11} />
-                <span>{p.title}</span>
-                <span className="dim mono">{NODE_KINDS[p.type].label}</span>
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
+      </header>
+      <div className="content cal-content">
+    <div className="cal">
       <div className="cal-wrap">
         <div className="cal-main">
           {view === 'month' ? (
@@ -426,6 +413,7 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
           onPick={(d) => go(view, d)}
           onSchedule={(n) => scheduleDraft(n)}
           onDragPage={setDragPage}
+          periods={periods}
           hint={
             view === 'month'
               ? 'Click a day to add a block, or its number to open it. Drag a page from To Schedule onto a day to set its due date.'
@@ -454,6 +442,8 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
         </div>
       )}
     </div>
+      </div>
+    </>
   );
 }
 

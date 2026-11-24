@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, Clock3, Flag } from 'lucide-react';
 import { clock, duration } from '@/lib/tz';
+import BlockHover from '@/components/calendar/BlockHover';
 import type { CalendarNode } from '@/lib/calendar';
 import type { SectorLookup } from '@/components/ObjectRow';
 import {
@@ -53,6 +54,17 @@ export default function TimeGrid(props: TimeGridProps) {
   const [preview, setPreview] = useState<Preview>(null);
   const [hover, setHover] = useState<{ date: string; min: number } | null>(null);
   const [dropAt, setDropAt] = useState<{ date: string; s: number; e: number } | null>(null);
+  const [card, setCard] = useState<{ b: CalBlock; rect: DOMRect } | null>(null);
+  const cardTimer = useRef<number | null>(null);
+  const showCard = (b: CalBlock, el: HTMLElement) => {
+    if (dragging.current) return;
+    if (cardTimer.current) window.clearTimeout(cardTimer.current);
+    cardTimer.current = window.setTimeout(() => setCard({ b, rect: el.getBoundingClientRect() }), 220);
+  };
+  const hideCard = () => {
+    if (cardTimer.current) window.clearTimeout(cardTimer.current);
+    setCard(null);
+  };
   const dragging = useRef(false);
   const single = days.length === 1;
   // The grid fills the space left on screen, so 5 AM to 11 PM shows without scrolling.
@@ -256,6 +268,7 @@ export default function TimeGrid(props: TimeGridProps) {
 
   return (
     <div className="tg" style={{ ['--cols' as string]: days.length }}>
+      {card && !preview && <BlockHover block={card.b} anchor={card.rect} lookup={lookup} />}
       <div className="tg-head">
         <div className="tg-gutter" />
         {days.map((d) => {
@@ -400,7 +413,12 @@ export default function TimeGrid(props: TimeGridProps) {
                           zIndex: 2 + pos.col,
                           ['--c' as string]: colour,
                         }}
-                        onPointerDown={(e) => startMove(e, piece, 'move')}
+                        onPointerDown={(e) => {
+                          hideCard();
+                          startMove(e, piece, 'move');
+                        }}
+                        onPointerEnter={(e) => e.pointerType === 'mouse' && showCard(piece, e.currentTarget)}
+                        onPointerLeave={hideCard}
                         role="button"
                         tabIndex={0}
                         aria-label={`${blockTitle(b)}, ${clock(b.s)} to ${clock(b.e)}`}

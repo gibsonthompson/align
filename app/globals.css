@@ -4240,3 +4240,182 @@ button.heat-cell:not(:disabled):hover {
 .tg-hour > span.tg-first {
   top: 2px;
 }
+
+/* Calendar controls in the top bar. */
+.top.cal-top {
+  gap: 10px;
+}
+
+.cal-top .cal-nav {
+  gap: 8px;
+}
+
+.cal-top .cal-title {
+  font-size: 17px;
+}
+
+.cal-top .btn {
+  height: 30px;
+}
+
+.cal-top .segmented button {
+  height: 24px;
+}
+
+.cal-top .cal-views {
+  width: 198px;
+}
+
+.content.cal-content {
+  padding-top: 12px;
+}
+
+.plan-item {
+  cursor: pointer;
+}
+
+.plan-item .plan-icon {
+  flex: none;
+  color: var(--c);
+  margin: 0 2px 0 4px;
+}
+
+.plan-item[data-done='true'] {
+  opacity: 0.5;
+}
+
+@media (max-width: 1180px) {
+  .cal-top .tag {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .top.cal-top {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 14px;
+    row-gap: 8px;
+  }
+  .cal-top .cal-nav {
+    flex: 1;
+    min-width: 0;
+  }
+  .cal-top .cal-tools {
+    width: 100%;
+    margin-left: 0;
+  }
+  .cal-top .cal-tools .btn:not(.primary) {
+    display: none;
+  }
+}
+
+/* Hover card for a block. */
+.bh {
+  position: fixed;
+  z-index: 300;
+  width: 300px;
+  max-height: calc(100dvh - 16px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow), inset 3px 0 0 var(--c);
+  pointer-events: none;
+  animation: fade 0.12s var(--ease);
+}
+
+.bh-sector {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.bh-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.bh-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.bh-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.bh-row svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+
+.bh-tags {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.bh-page,
+.bh-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.bh-text {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 10;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-left: 21px;
+}
+
+.bh-foot {
+  font-size: 11px;
+  color: var(--text-3);
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+/* Side panel when it sits under the calendar: two columns, never a lone panel on a row. */
+@media (max-width: 1180px) {
+  .cal-side {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .cal-side > .panel {
+    grid-column: auto;
+  }
+  .cal-side > .panel:nth-last-child(2):nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .cal-side {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

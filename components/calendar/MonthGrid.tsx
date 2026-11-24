@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import BlockHover from '@/components/calendar/BlockHover';
 import Link from 'next/link';
 import { Clock3, Flag } from 'lucide-react';
 import { clock } from '@/lib/tz';
@@ -40,6 +41,12 @@ export default function MonthGrid({
   onDragPage: (p: DragPage | null) => void;
 }) {
   const [over, setOver] = useState<string | null>(null);
+  const [card, setCard] = useState<{ b: CalBlock; rect: DOMRect } | null>(null);
+  const timer = useRef<number | null>(null);
+  const hide = () => {
+    if (timer.current) window.clearTimeout(timer.current);
+    setCard(null);
+  };
   const byDay = new Map<string, CalBlock[]>();
   for (const b of blocks) byDay.set(b.date, [...(byDay.get(b.date) ?? []), b]);
   const colour = (id: string | null) => (id ? (lookup[id]?.colour ?? '#8a8a8a') : '#8a8a8a');
@@ -47,6 +54,7 @@ export default function MonthGrid({
 
   return (
     <div className="mg">
+      {card && <BlockHover block={card.b} anchor={card.rect} lookup={lookup} movable={false} />}
       <div className="mg-head">
         {DOW.map((d) => (
           <div key={d}>{d}</div>
@@ -68,8 +76,16 @@ export default function MonthGrid({
                   className="mg-item blk-line"
                   data-status={b.status}
                   style={{ ['--c' as string]: colour(b.sector_id) }}
+                  onPointerEnter={(e) => {
+                    if (e.pointerType !== 'mouse') return;
+                    const el = e.currentTarget;
+                    if (timer.current) window.clearTimeout(timer.current);
+                    timer.current = window.setTimeout(() => setCard({ b, rect: el.getBoundingClientRect() }), 220);
+                  }}
+                  onPointerLeave={hide}
                   onClick={(e) => {
                     e.stopPropagation();
+                    hide();
                     onOpen(b);
                   }}
                 >

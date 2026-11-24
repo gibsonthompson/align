@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import { getCalendar, type CalendarNode } from '@/lib/calendar';
 import { db } from '@/lib/db';
 import { isId } from '@/lib/ids';
-import TopBar from '@/components/TopBar';
 import Calendar from '@/components/calendar/Calendar';
 
 export const dynamic = 'force-dynamic';
@@ -27,11 +26,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   }
 
   return (
-    <>
-      <TopBar title="Calendar" />
-      <div className="content cal-content">
-        <Calendar key={`${data.view}:${data.from}`} data={data} explicitView={Boolean(one(sp.view))} scheduleNode={scheduleNode} />
-      </div>
-    </>
+    <Calendar key={`${data.view}:${data.from}`} data={data} explicitView={Boolean(one(sp.view))} scheduleNode={scheduleNode} />
   );
 }
