@@ -13,8 +13,12 @@ import ChildrenSection from '@/components/ChildrenSection';
 import LinksSection from '@/components/LinksSection';
 import NotesSection from '@/components/NotesSection';
 import ActivitySection from '@/components/ActivitySection';
+import NodeSchedule from '@/components/NodeSchedule';
 
 export const dynamic = 'force-dynamic';
+
+// Kinds that are done in a sitting, so they get a time on the calendar.
+const SCHEDULABLE = ['action', 'task', 'micro_goal', 'commitment', 'phase'];
 // The brain can take a while to think.
 export const maxDuration = 120;
 
@@ -83,6 +87,7 @@ export default async function NodePage({ params, searchParams }: { params: Promi
           </div>
           <aside className="page-side">
             <NodeProperties key={`p-${node.id}`} node={node} sector={page.sector ?? top} pinned={page.pinned} allSectors={page.allSectors} sectors={lookup} />
+            {(SCHEDULABLE.includes(node.type) || page.blocks.length > 0) && <NodeSchedule node={node} blocks={page.blocks} />}
             <LinksSection key={`l-${node.id}`} self={{ type: 'node', id: node.id }} selfTitle={node.title} links={page.links} sectors={lookup} />
             <ActivitySection rows={page.activity} />
           </aside>

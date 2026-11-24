@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { History } from 'lucide-react';
 import { hrefFor, NODE_KINDS, relationLabel, STATUS_LABEL } from '@/lib/kinds';
 import { money, shortDate, timeAgo } from '@/lib/format';
+import { clock, utcToZoned } from '@/lib/tz';
 import type { Activity, NodeStatus, NodeType, ObjectRef, Relation } from '@/lib/types';
 import EmptyState from '@/components/EmptyState';
 
@@ -10,6 +11,11 @@ type Row = Activity & { other?: ObjectRef | null };
 function Other({ other, fallback }: { other?: ObjectRef | null; fallback: string }) {
   if (!other) return <b>{fallback}</b>;
   return <Link href={hrefFor(other)}>{other.title}</Link>;
+}
+
+function when(ts: string): string {
+  const z = utcToZoned(ts);
+  return `${shortDate(z.date)} at ${clock(z.minutes)}`;
 }
 
 function describe(r: Row): { text: React.ReactNode; tone: 'plain' | 'strong' | 'good' } {
@@ -89,6 +95,21 @@ function describe(r: Row): { text: React.ReactNode; tone: 'plain' | 'strong' | '
       return { text: <>Note added</>, tone: 'plain' };
     case 'note_removed':
       return { text: <>Note removed</>, tone: 'plain' };
+    case 'scheduled':
+    case 'rescheduled':
+    case 'unscheduled':
+    case 'session_done':
+    case 'session_skipped': {
+      const label = { scheduled: 'Scheduled for', rescheduled: 'Moved to', unscheduled: 'Taken off the calendar,', session_done: 'Session done,', session_skipped: 'Session skipped,' }[r.action];
+      return {
+        text: (
+          <>
+            {label} {d.start ? when(d.start) : ''}
+          </>
+        ),
+        tone: r.action === 'session_done' ? 'good' : 'plain',
+      };
+    }
     case 'event':
       return {
         text: (

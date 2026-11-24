@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { Orbit } from 'lucide-react';
+import { CalendarClock, Orbit } from 'lucide-react';
 import { getToday } from '@/lib/data';
 import { sectorLookup } from '@/lib/sectors';
 import { countdown, dueLabel, greeting, longToday, money, shortDate, spanLabel } from '@/lib/format';
+import { clock, utcToZoned } from '@/lib/tz';
 import type { AlignNode, ObjectRef } from '@/lib/types';
 import TopBar from '@/components/TopBar';
 import ObjectRow from '@/components/ObjectRow';
@@ -44,7 +45,8 @@ export default async function TodayPage() {
   const t = await getToday();
   const lookup = sectorLookup(t.sectors);
   const coming = [...t.overdue, ...t.due];
-  const nothing = !t.pinned.length && !t.recent.length && !coming.length && !t.objectives.length && !t.periods.length && !t.events.length;
+  const nowMs = Date.now();
+  const nothing = !t.schedule.length && !t.pinned.length && !t.recent.length && !coming.length && !t.objectives.length && !t.periods.length && !t.events.length;
 
   return (
     <>
@@ -140,6 +142,44 @@ export default async function TodayPage() {
               </section>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2 className="panel-title">
+                    Today&apos;s Schedule <span className="count">{t.schedule.length}</span>
+                  </h2>
+                  <Link href="/calendar?view=day" className="panel-note">
+                    Open Calendar
+                  </Link>
+                </div>
+                {t.schedule.length ? (
+                  <div className="rows">
+                    {t.schedule.map((b) => {
+                      const a = utcToZoned(b.start_at);
+                      const z = utcToZoned(b.end_at);
+                      const live = new Date(b.start_at).getTime() <= nowMs && new Date(b.end_at).getTime() > nowMs;
+                      const colour = b.sector_id ? (lookup[b.sector_id]?.colour ?? '#8a8a8a') : '#8a8a8a';
+                      return (
+                        <Link key={b.id} href={b.node_id ? `/n/${b.node_id}` : '/calendar?view=day'} className="sched-row" data-status={b.status} data-now={live} style={{ ['--c' as string]: colour }}>
+                          <span className="sched-time">
+                            {clock(a.minutes, true)} to {clock(z.minutes, true)}
+                          </span>
+                          <span className="sched-title">
+                            <i className="swatch" aria-hidden />
+                            <span>{b.title || b.node?.title || 'Untitled'}</span>
+                          </span>
+                          {b.status === 'done' ? <span className="tag good">Done</span> : live ? <span className="tag soon">Now</span> : <span />}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <EmptyState Icon={CalendarClock} title="Nothing Scheduled Today" body="Block out time on the calendar and it shows up here in order.">
+                    <Link href="/calendar?view=day" className="btn">
+                      Open Calendar
+                    </Link>
+                  </EmptyState>
+                )}
+              </section>
               <section className="panel">
                 <div className="panel-head">
                   <h2 className="panel-title">

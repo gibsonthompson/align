@@ -2,7 +2,8 @@ import 'server-only';
 import { db } from '@/lib/db';
 import { requireSession } from '@/lib/auth';
 import { addDaysISO, todayISO } from '@/lib/format';
-import type { Activity, AlignNode, BrainMessage, ChildRow, Crumb, Fact, LinkRow, Note, ObjectRef, ObjectType, Sector } from '@/lib/types';
+import { zonedToUtc } from '@/lib/tz';
+import type { Activity, AlignNode, Block, BrainMessage, ChildRow, Crumb, Fact, LinkRow, Note, ObjectRef, ObjectType, Sector } from '@/lib/types';
 import { brainConfigured, brainModel } from '@/lib/brain';
 
 const SECTOR_COLS =
@@ -126,6 +127,7 @@ export interface NodePage {
   pinned: boolean;
   allSectors: Sector[];
   brain: BrainData;
+  blocks: Block[];
 }
 
 export async function getNodePage(id: string): Promise<NodePage | null> {
@@ -135,7 +137,7 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
   if (!node) return null;
   const n = node as AlignNode;
 
-  const [path, children, links, notes, activity, pinned, allSectors, brain] = await Promise.all([
+  const [path, children, links, notes, activity, pinned, allSectors, brain, blocks] = await Promise.all([
     db().rpc('align_node_path', { p_id: n.id }),
     db().rpc('align_children', { p_parent: n.id }),
     getLinks('node', n.id),
@@ -144,6 +146,12 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
     isPinned('node', n.id),
     getSectors(),
     getBrainForNode(n),
+    db()
+      .from('align_blocks')
+      .select('id, node_id, sector_id, title, notes, start_at, end_at, status, source')
+      .eq('node_id', n.id)
+      .order('start_at', { ascending: false })
+      .limit(60),
   ]);
   if (path.error) fail('the path', path.error);
   if (children.error) fail('the pages under this one', children.error);
@@ -159,6 +167,7 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
     pinned,
     allSectors,
     brain,
+    blocks: (blocks.data ?? []) as Block[],
   };
 }
 
@@ -308,15 +317,34 @@ export interface TodayData {
   objectives: (AlignNode & { sector: Sector | null })[];
   periods: (AlignNode & { sector: Sector | null })[];
   events: (AlignNode & { sector: Sector | null })[];
+  schedule: Block[];
   inbox: number;
   sectors: Sector[];
+}
+
+async function todaysBlocks(today: string): Promise<Block[]> {
+  const { data } = await db()
+    .from('align_blocks')
+    .select('id, node_id, sector_id, title, notes, start_at, end_at, status, source')
+    .lt('start_at', zonedToUtc(addDaysISO(today, 1), 0).toISOString())
+    .gt('end_at', zonedToUtc(today, 0).toISOString())
+    .order('start_at')
+    .limit(60);
+  const blocks = ((data ?? []) as Block[]).sort((a, b) => a.start_at.localeCompare(b.start_at));
+  const ids = [...new Set(blocks.map((b) => b.node_id).filter(Boolean))] as string[];
+  if (ids.length) {
+    const { data: nodes } = await db().from('align_nodes').select('id, title, type, status, effort_minutes, done_criteria').in('id', ids);
+    const map = new Map(((nodes ?? []) as NonNullable<Block['node']>[]).map((n) => [n.id, n]));
+    for (const b of blocks) b.node = b.node_id ? (map.get(b.node_id) ?? null) : null;
+  }
+  return blocks;
 }
 
 export async function getToday(): Promise<TodayData> {
   await requireSession();
   const today = todayISO();
   const open = ['active', 'planned', 'inbox', 'paused'];
-  const [pinned, recent, due, overdue, objectives, inbox, sectors, periods, events] = await Promise.all([
+  const [pinned, recent, due, overdue, objectives, inbox, sectors, periods, events, schedule] = await Promise.all([
     getPinned(),
     getRecent(6),
     db()
@@ -346,6 +374,7 @@ export async function getToday(): Promise<TodayData> {
       .order('start_date')
       .limit(20),
     db().from('align_nodes').select(NODE_COLS).eq('archived', false).gte('event_date', today).lte('event_date', addDaysISO(today, 365)).order('event_date').limit(12),
+    todaysBlocks(today),
   ]);
   if (due.error) fail('what is due', due.error);
   if (periods.error) fail('this week', periods.error);
@@ -361,6 +390,7 @@ export async function getToday(): Promise<TodayData> {
     objectives: withSector((objectives.data ?? []) as AlignNode[]),
     periods: withSector((periods.data ?? []) as AlignNode[]),
     events: withSector((events.data ?? []) as AlignNode[]),
+    schedule,
     inbox: inbox.count ?? 0,
     sectors,
   };

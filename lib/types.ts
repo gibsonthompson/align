@@ -181,3 +181,20 @@ export interface Fact {
   node_id: string | null;
   created_at: string;
 }
+
+// A slot of time on the calendar, optionally belonging to a page.
+export type BlockStatus = 'planned' | 'done' | 'skipped';
+
+export interface Block {
+  id: string;
+  node_id: string | null;
+  sector_id: string | null;
+  title: string;
+  notes: string;
+  start_at: string;
+  end_at: string;
+  status: BlockStatus;
+  source: 'align' | 'chatgpt' | 'google';
+  // From the linked page, when there is one.
+  node?: { id: string; title: string; type: NodeType; status: NodeStatus; effort_minutes: number | null; done_criteria: string } | null;
+}

@@ -1,19 +1,36 @@
-import { CalendarDays } from 'lucide-react';
+import type { Metadata } from 'next';
+import { getCalendar, type CalendarNode } from '@/lib/calendar';
+import { db } from '@/lib/db';
+import { isId } from '@/lib/ids';
 import TopBar from '@/components/TopBar';
-import ComingSoon from '@/components/ComingSoon';
+import Calendar from '@/components/calendar/Calendar';
 
-export default function CalendarPage() {
+export const dynamic = 'force-dynamic';
+export const metadata: Metadata = { title: 'Calendar · Align' };
+
+export default async function CalendarPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const sp = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  const data = await getCalendar(one(sp.view), one(sp.date));
+
+  // "Schedule It" from a page opens the calendar with that page ready to place.
+  let scheduleNode: CalendarNode | null = null;
+  const sid = one(sp.schedule);
+  if (isId(sid)) {
+    const { data: n } = await db()
+      .from('align_nodes')
+      .select('id, type, title, status, sector_id, parent_id, due_date, start_date, event_date, location, effort_minutes, done_criteria, actionable')
+      .eq('id', sid)
+      .eq('archived', false)
+      .maybeSingle();
+    scheduleNode = (n as CalendarNode | null) ?? null;
+  }
+
   return (
     <>
       <TopBar title="Calendar" />
-      <div className="content narrow">
-      <ComingSoon
-        phase={5}
-        Icon={CalendarDays}
-        title="The Time View Of Your Life"
-        body="Every block on the calendar will belong to something in your life map and open the page it serves."
-        items={['Day, Week And Month Views', 'Quarter And Year Timelines', 'Habit Slots', 'Drag To Reschedule', 'Sector Balance Per Week', 'Google Calendar Sync']}
-      />
+      <div className="content cal-content">
+        <Calendar key={`${data.view}:${data.from}`} data={data} explicitView={Boolean(one(sp.view))} scheduleNode={scheduleNode} />
       </div>
     </>
   );

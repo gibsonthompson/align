@@ -10,8 +10,10 @@ import { missingEnvNames } from '@/lib/env';
 import { createSession, SESSION_COOKIE, sessionCookieOptions } from '@/lib/session';
 import { cleanBody, cleanLink, cleanText, isId, slugify } from '@/lib/ids';
 import { addDaysISO, isISODate } from '@/lib/format';
+import { zonedToUtc } from '@/lib/tz';
+import { BLOCK_COLS } from '@/lib/calendar';
 import { NODE_KINDS, PERIOD_TYPES, SECTOR_ICON_NAMES } from '@/lib/kinds';
-import type { ActionResult, AlignNode, BrainMessage, BrainProposal, BrainReply, NodeStatus, NodeType, ObjectRef, ObjectType, Relation, Sector } from '@/lib/types';
+import type { ActionResult, AlignNode, Block, BlockStatus, BrainMessage, BrainProposal, BrainReply, NodeStatus, NodeType, ObjectRef, ObjectType, Relation, Sector } from '@/lib/types';
 import { BrainError, brainModel, nextTypes, runBrain, type BrainTarget } from '@/lib/brain';
 
 const NODE_TYPES = Object.keys(NODE_KINDS) as NodeType[];
@@ -687,6 +689,114 @@ export async function disconnectClient(clientId: string): Promise<ActionResult> 
   if (typeof clientId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(clientId)) return err('That connection is already gone.');
   const { error } = await db().from('align_oauth_clients').delete().eq('client_id', clientId);
   if (error) return err('Could not disconnect. Try again.');
+  refresh();
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Calendar blocks. Times arrive as a wall-clock date plus minutes after midnight
+// in Gibson's time zone, so the browser's own clock never shifts them.
+// ---------------------------------------------------------------------------
+
+const BLOCK_STATUSES: BlockStatus[] = ['planned', 'done', 'skipped'];
+
+function blockTimes(date: unknown, start: unknown, end: unknown): { start_at: string; end_at: string } | string {
+  if (!isISODate(date)) return 'Pick a day.';
+  const s = Number(start);
+  const e = Number(end);
+  if (!Number.isInteger(s) || !Number.isInteger(e) || s < 0 || s > 1439 || e < 1 || e > 1440) return 'Pick a start and end time.';
+  if (e <= s) return 'The end time has to be after the start.';
+  return { start_at: zonedToUtc(date, s).toISOString(), end_at: zonedToUtc(date, e).toISOString() };
+}
+
+export async function createBlock(input: {
+  nodeId?: string | null;
+  sectorId?: string | null;
+  title?: string;
+  notes?: string;
+  date: string;
+  start: number;
+  end: number;
+  status?: BlockStatus;
+}): Promise<ActionResult<{ block: Block }>> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  const times = blockTimes(input.date, input.start, input.end);
+  if (typeof times === 'string') return err(times);
+  const nodeId = input.nodeId && isId(input.nodeId) ? input.nodeId : null;
+  const title = cleanText(input.title ?? '', 300);
+  if (!nodeId && !title) return err('Give it a title or link it to a page.');
+  if (nodeId) {
+    const { data: node } = await db().from('align_nodes').select('id, archived').eq('id', nodeId).maybeSingle();
+    if (!node || node.archived) return err('That page no longer exists.');
+  }
+  const status = BLOCK_STATUSES.includes(input.status as BlockStatus) ? input.status : 'planned';
+  const sectorId = !nodeId && input.sectorId && isId(input.sectorId) ? input.sectorId : null;
+  const { data, error } = await db()
+    .from('align_blocks')
+    .insert({ node_id: nodeId, sector_id: sectorId, title, notes: cleanBody(input.notes ?? '', 5000), status, ...times })
+    .select(BLOCK_COLS)
+    .single();
+  if (error || !data) return err(dbError(error, 'Could not add it to the calendar. Try again.'));
+  refresh();
+  return { ok: true, data: { block: data as Block } };
+}
+
+export async function updateBlock(
+  id: string,
+  patch: { title?: string; notes?: string; nodeId?: string | null; sectorId?: string | null; date?: string; start?: number; end?: number; status?: BlockStatus },
+): Promise<ActionResult<{ block: Block }>> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(id)) return err('That block is gone. Reload the calendar.');
+  const row: Record<string, unknown> = {};
+  if (patch.title !== undefined) row.title = cleanText(patch.title, 300);
+  if (patch.notes !== undefined) row.notes = cleanBody(patch.notes, 5000);
+  if (patch.nodeId !== undefined) {
+    if (patch.nodeId === null) row.node_id = null;
+    else {
+      if (!isId(patch.nodeId)) return err('That page no longer exists.');
+      const { data: node } = await db().from('align_nodes').select('id, archived').eq('id', patch.nodeId).maybeSingle();
+      if (!node || node.archived) return err('That page no longer exists.');
+      row.node_id = patch.nodeId;
+    }
+  }
+  if (patch.sectorId !== undefined) {
+    if (patch.sectorId !== null && !isId(patch.sectorId)) return err('Unknown sector.');
+    row.sector_id = patch.sectorId;
+  }
+  if (patch.date !== undefined || patch.start !== undefined || patch.end !== undefined) {
+    const times = blockTimes(patch.date, patch.start, patch.end);
+    if (typeof times === 'string') return err(times);
+    Object.assign(row, times);
+  }
+  if (patch.status !== undefined) {
+    if (!BLOCK_STATUSES.includes(patch.status)) return err('Unknown status.');
+    row.status = patch.status;
+  }
+  if (!Object.keys(row).length) return err('Nothing to change.');
+  // Unlinking a block needs a title of its own.
+  if (row.node_id === null && row.title === undefined) {
+    const { data: cur } = await db().from('align_blocks').select('title, node_id').eq('id', id).maybeSingle();
+    if (cur && !cur.title) {
+      const { data: n } = cur.node_id ? await db().from('align_nodes').select('title').eq('id', cur.node_id).maybeSingle() : { data: null };
+      row.title = (n?.title as string | undefined) ?? 'Untitled';
+    }
+  }
+  if (row.title === '' && row.node_id === undefined) {
+    const { data: cur } = await db().from('align_blocks').select('node_id').eq('id', id).maybeSingle();
+    if (!cur?.node_id) return err('Give it a title or link it to a page.');
+  }
+  const { data, error } = await db().from('align_blocks').update(row).eq('id', id).select(BLOCK_COLS).maybeSingle();
+  if (error) return err(dbError(error, 'Could not save. Try again.'));
+  if (!data) return err('That block is gone. Reload the calendar.');
+  refresh();
+  return { ok: true, data: { block: data as Block } };
+}
+
+export async function deleteBlock(id: string): Promise<ActionResult> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  if (!isId(id)) return err('That block is already gone.');
+  const { error } = await db().from('align_blocks').delete().eq('id', id);
+  if (error) return err(dbError(error, 'Could not remove it. Try again.'));
   refresh();
   return { ok: true };
 }
