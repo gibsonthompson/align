@@ -6,6 +6,7 @@ import { NODE_KINDS, PERIOD_TYPES } from '@/lib/kinds';
 import { hhmm, parseClock, TZ, utcToZoned, zonedToUtc } from '@/lib/tz';
 import { getHabits, getMeasures, placeHabitSessions, type HabitRow, type MeasureRow } from '@/lib/progress';
 import { scheduleLabel } from '@/lib/habits';
+import { guessSector } from '@/lib/classify';
 import type { NodeType, NodeStatus, Relation, Sector } from '@/lib/types';
 
 // The tools ChatGPT gets in Align. Read tools are marked read-only; everything
@@ -662,7 +663,7 @@ async function shiftDates(a: Args) {
 const BLOCK_SELECT = 'id, node_id, sector_id, title, notes, start_at, end_at, status, source';
 type BlockRow = { id: string; node_id: string | null; sector_id: string | null; title: string; notes: string; start_at: string; end_at: string; status: string; source: string };
 
-async function blocksBetween(from: string, to: string): Promise<(BlockRow & { page_title?: string; page_type?: NodeType })[]> {
+async function blocksBetween(from: string, to: string): Promise<(BlockRow & { page_title?: string; page_type?: NodeType; sector_name?: string })[]> {
   const { data, error } = await db()
     .from('align_blocks')
     .select(BLOCK_SELECT)
@@ -671,7 +672,15 @@ async function blocksBetween(from: string, to: string): Promise<(BlockRow & { pa
     .order('start_at')
     .limit(1000);
   if (error) throw new ToolError('Could not load the calendar.');
-  const rows = (data ?? []) as (BlockRow & { page_title?: string; page_type?: NodeType })[];
+  const rows = (data ?? []) as (BlockRow & { page_title?: string; page_type?: NodeType; sector_name?: string })[];
+  if (rows.some((r) => r.sector_id)) {
+    const all = await sectors();
+    for (const r of rows) {
+      const s = all.find((x) => x.id === r.sector_id);
+      const p = s?.parent_id ? all.find((x) => x.id === s.parent_id) : null;
+      if (s) r.sector_name = p ? `${p.name} / ${s.name}` : s.name;
+    }
+  }
   const ids = [...new Set(rows.map((r) => r.node_id).filter(Boolean))] as string[];
   if (ids.length) {
     const { data: nodes } = await db().from('align_nodes').select('id, title, type').in('id', ids);
@@ -687,7 +696,7 @@ async function blocksBetween(from: string, to: string): Promise<(BlockRow & { pa
   return rows;
 }
 
-function blockOut(b: BlockRow & { page_title?: string; page_type?: NodeType }, ctx: Ctx) {
+function blockOut(b: BlockRow & { page_title?: string; page_type?: NodeType; sector_name?: string }, ctx: Ctx) {
   const a = utcToZoned(b.start_at);
   const z = utcToZoned(b.end_at);
   const minutes = Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000);
@@ -699,6 +708,7 @@ function blockOut(b: BlockRow & { page_title?: string; page_type?: NodeType }, c
     end: z.date === a.date ? hhmm(z.minutes) : `${z.date} ${hhmm(z.minutes)}`,
     minutes,
     status: b.status,
+    ...(b.sector_name ? { sector: b.sector_name } : {}),
     ...(b.node_id ? { page_id: b.node_id, page_kind: b.page_type ? NODE_KINDS[b.page_type]?.label : undefined, page_url: url(ctx, 'node', b.node_id) } : {}),
     ...(b.notes ? { notes: b.notes } : {}),
   };
@@ -739,8 +749,8 @@ async function getCalendarTool(a: Args, ctx: Ctx) {
   const to = (date(a.to, 'to') ?? addDaysISO(from, 6)) as string;
   if (to < from) throw new ToolError('to is before from.');
   if (addDaysISO(from, 30) < to) throw new ToolError('Ask for at most 31 days at a time.');
-  const dayStart = a.day_start === undefined ? 6 * 60 : parseClock(a.day_start);
-  const dayEnd = a.day_end === undefined ? 22 * 60 : parseClock(a.day_end);
+  const dayStart = a.day_start === undefined ? 5 * 60 : parseClock(a.day_start);
+  const dayEnd = a.day_end === undefined ? 23 * 60 : parseClock(a.day_end);
   if (dayStart === null || dayEnd === null || dayEnd <= dayStart) throw new ToolError('day_start and day_end are times like "06:00" and "22:00".');
   const rows = await blocksBetween(from, to);
   const busy = busyByDay(rows);
@@ -761,6 +771,7 @@ async function getCalendarTool(a: Args, ctx: Ctx) {
 interface BlockInput {
   page_id?: unknown;
   title?: unknown;
+  sector_slug?: unknown;
   date?: unknown;
   start?: unknown;
   end?: unknown;
@@ -788,7 +799,18 @@ async function scheduleBlocks(a: Args, ctx: Ctx) {
   const list = a.blocks as BlockInput[];
   if (!Array.isArray(list) || !list.length) throw new ToolError('blocks must be a non-empty list.');
   if (list.length > 60) throw new ToolError('Schedule at most 60 blocks per call.');
-  const rows: { node_id: string | null; title: string; notes: string; start_at: string; end_at: string; source: string; span: { date: string; s: number; e: number }; label: string }[] = [];
+  const rows: {
+    node_id: string | null;
+    sector_id?: string | null;
+    sector_auto?: boolean;
+    title: string;
+    notes: string;
+    start_at: string;
+    end_at: string;
+    source: string;
+    span: { date: string; s: number; e: number };
+    label: string;
+  }[] = [];
   const pageIds = list.map((b) => b.page_id).filter((x) => x !== undefined && x !== null);
   for (const id of pageIds) if (!isId(id)) throw new ToolError(`${String(id)} is not a valid page id.`);
   const { data: pages } = pageIds.length ? await db().from('align_nodes').select('id, title, archived').in('id', pageIds as string[]) : { data: [] };
@@ -811,6 +833,22 @@ async function scheduleBlocks(a: Args, ctx: Ctx) {
       label: `${label} (${title || node?.title})`,
     });
   });
+  // Standalone blocks get a sector: the one asked for, or one guessed from the words.
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (r.node_id) continue;
+    const slug = list[i].sector_slug;
+    if (slug) {
+      r.sector_id = (await sectorBySlug(slug)).id;
+      r.sector_auto = false;
+    } else {
+      const g = await guessSector(r.title, r.notes, { allowAi: true }).catch(() => null);
+      if (g && g.confidence !== 'low') {
+        r.sector_id = g.sectorId;
+        r.sector_auto = true;
+      }
+    }
+  }
   // Double-booking check, against the calendar and within this batch.
   if (a.allow_overlap !== true) {
     const dates = rows.map((r) => r.span.date).sort();
@@ -1172,14 +1210,14 @@ export const TOOLS: {
     name: 'get_calendar',
     title: 'Get the calendar',
     description:
-      'Exact time blocks on Gibson\'s calendar for a date range (default 7 days from today, at most 31), with each block\'s page, and the free gaps per day inside a waking window (default 06:00 to 22:00, set day_start and day_end to change it). Times are "HH:MM" in America/New_York. Call it before scheduling so new blocks land in real free time.',
+      'Exact time blocks on Gibson\'s calendar for a date range (default 7 days from today, at most 31), with each block\'s page and sector, and the free gaps per day inside Gibson\'s day (default 05:00 to 23:00, set day_start and day_end to narrow it). Times are "HH:MM" in America/New_York. Call it before scheduling so new blocks land in real free time.',
     inputSchema: {
       type: 'object',
       properties: {
         from: { type: 'string', description: 'YYYY-MM-DD, default today' },
         to: { type: 'string', description: 'YYYY-MM-DD' },
-        day_start: { type: 'string', description: 'HH:MM, default 06:00' },
-        day_end: { type: 'string', description: 'HH:MM, default 22:00' },
+        day_start: { type: 'string', description: 'HH:MM, default 05:00' },
+        day_end: { type: 'string', description: 'HH:MM, default 23:00' },
       },
     },
     annotations: READ,
@@ -1202,6 +1240,7 @@ export const TOOLS: {
             properties: {
               page_id: { type: 'string', description: 'The page this time is for (usually a daily action or task)' },
               title: { type: 'string', description: 'Required when there is no page_id; optional label otherwise' },
+              sector_slug: { type: 'string', description: 'For a standalone block: its sector or area. Left out, it is guessed from the title and notes.' },
               date: { type: 'string', description: 'YYYY-MM-DD' },
               start: { type: 'string', description: 'HH:MM, 24-hour' },
               end: { type: 'string', description: 'HH:MM, 24-hour, same day' },
@@ -1512,6 +1551,7 @@ How to work in Align:
 - For anything in the real world (races, events, classes, products, prices), search the web first, show Gibson the real options with dates, prices and links, let him pick, then write the chosen one in with its event details.
 - Plans with a date work backward from it. Lay out the Months, then the Weeks inside each Month with exact dates, then date each Daily Action on a sensible day of its week (due_date). Check get_schedule first so new actions do not stack onto days that are already full.
 - When something slips, use shift_dates or update_pages to re-date what is left rather than leaving it overdue.
+- His day runs 5 AM to 11 PM; never book outside it unless he asks. Standalone blocks are filed into a sector automatically from their title and notes, so give them a clear title and useful notes (or pass sector_slug when you know it).
 - Dates say which day; the calendar says when. To give work an actual time, call get_calendar for free gaps and then schedule_blocks with the page_id of each action. Put sessions where they fit his life (runs in the morning if he prefers, nothing on top of existing blocks, rest days kept free) and keep each block the length of the action's effort_minutes. Times are always America/New_York.
 - When he says he did something, mark its block done with update_block (that also marks the action done), or update_page if it had no block.
 - Ongoing commitments (run 3 times a week, practice guitar daily) should be habits: create the weekly commitment page, then set_habit with its schedule, minutes and time window. Use place_habits to put the week's sessions on the calendar. When he reports doing one, check_in (finishing its calendar block also checks it in).

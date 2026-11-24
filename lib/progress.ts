@@ -138,8 +138,8 @@ export async function placeHabitSessions(weekAnchor: string, onlyHabitIds?: stri
       out.skipped.push({ habit: h.node.title, reason: 'Already on track or booked for this week.' });
       continue;
     }
-    const winStart = h.window_start ?? 6 * 60;
-    const winEnd = h.window_end ?? 22 * 60;
+    const winStart = h.window_start ?? 5 * 60;
+    const winEnd = h.window_end ?? 23 * 60;
     for (const d of days) {
       const taken = busy.get(d) ?? [];
       const from = Math.max(winStart, d === today ? Math.ceil((nowMin + 10) / 15) * 15 : 0);

@@ -8,7 +8,7 @@ import type { AlignNode, Block, Sector } from '@/lib/types';
 
 export type CalendarView = 'day' | 'week' | 'month';
 
-export const BLOCK_COLS = 'id, node_id, sector_id, title, notes, start_at, end_at, status, source';
+export const BLOCK_COLS = 'id, node_id, sector_id, sector_auto, title, notes, start_at, end_at, status, source';
 const NODE_LITE = 'id, type, title, status, sector_id, parent_id, due_date, start_date, event_date, location, effort_minutes, done_criteria, actionable';
 
 export type CalendarNode = Pick<
@@ -30,8 +30,9 @@ export interface CalendarData {
   sectors: Sector[];
 }
 
+// The calendar opens on the day.
 export function parseView(v: unknown): CalendarView {
-  return v === 'day' || v === 'month' ? v : 'week';
+  return v === 'week' || v === 'month' ? v : 'day';
 }
 
 export function rangeFor(view: CalendarView, anchor: string): { from: string; to: string } {

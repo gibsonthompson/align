@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ExternalLink, Link2, Loader2, Search, Trash2, X } from 'lucide-react';
-import { findObjects } from '@/app/actions';
+import { ExternalLink, Link2, Loader2, Search, Sparkles, Trash2, X } from 'lucide-react';
+import { findObjects, suggestSector } from '@/app/actions';
 import { clock, duration } from '@/lib/tz';
 import { kindIcon, kindLabel } from '@/lib/kinds';
 import type { BlockStatus, ObjectRef, Sector } from '@/lib/types';
@@ -37,6 +37,9 @@ export default function BlockSheet({
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [guess, setGuess] = useState<{ sectorId: string; name: string; reason: string } | null>(null);
+  const [guessing, setGuessing] = useState(false);
+  const guessSeq = useRef(0);
 
   useEffect(() => {
     if (draft) {
@@ -44,8 +47,32 @@ export default function BlockSheet({
       setError(null);
       setConfirmDelete(false);
       setLinking(false);
+      setGuess(null);
     }
   }, [draft]);
+
+  // Standalone time: guess its sector from the title and notes as they are typed,
+  // unless a sector was picked by hand.
+  const text = d && !d.nodeId ? `${d.title}\u0000${d.notes}` : '';
+  useEffect(() => {
+    if (!d || d.nodeId) return;
+    if (d.title.trim().length < 2 && d.notes.trim().length < 4) {
+      setGuess(null);
+      return;
+    }
+    const n = ++guessSeq.current;
+    const t = window.setTimeout(async () => {
+      setGuessing(true);
+      const res = await suggestSector(d.title, d.notes);
+      if (n !== guessSeq.current) return;
+      setGuessing(false);
+      const g = res.ok ? res.data : null;
+      if (!g || g.confidence === 'low') return setGuess(null);
+      setGuess({ sectorId: g.sectorId, name: g.name, reason: g.reason });
+      setD((cur) => (cur && !cur.nodeId && (cur.sectorAuto || !cur.sectorId) ? { ...cur, sectorId: g.sectorId, sectorAuto: true } : cur));
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startOpts = useMemo(() => Array.from({ length: DAY_MIN / SNAP }, (_, i) => ({ value: String(i * SNAP), label: clock(i * SNAP) })), []);
   const endOpts = useMemo(() => {
@@ -147,10 +174,37 @@ export default function BlockSheet({
               <button type="button" className="btn" onClick={() => setLinking(true)}>
                 <Link2 size={14} /> Link to a page
               </button>
-              <Dropdown label="Sector" value={d.sectorId ?? ''} options={sectorOpts} placeholder="Sector" onChange={(v) => set({ sectorId: v || null })} />
+              <Dropdown label="Sector" value={d.sectorId ?? ''} options={sectorOpts} placeholder="Sector" onChange={(v) => set({ sectorId: v || null, sectorAuto: false })} />
             </div>
           )}
-          {!d.nodeId && !linking && <span className="dim" style={{ fontSize: 12 }}>Standalone time, like a meeting or an errand. Pick a sector so it counts toward the right part of your life.</span>}
+          {!d.nodeId && !linking && (
+            <span className="bs-guess">
+              {guessing ? (
+                <>
+                  <Loader2 size={12} className="spin" /> <span>Reading the title and notes</span>
+                </>
+              ) : guess && d.sectorAuto && d.sectorId === guess.sectorId ? (
+                <>
+                  <Sparkles size={12} />
+                  <span>
+                    Filed under {guess.name}. {guess.reason}.
+                  </span>
+                </>
+              ) : guess && d.sectorId !== guess.sectorId ? (
+                <>
+                  <Sparkles size={12} />
+                  <span>Looks like {guess.name}.</span>
+                  <button type="button" className="bs-guess-use" onClick={() => set({ sectorId: guess.sectorId, sectorAuto: true })}>
+                    Use it
+                  </button>
+                </>
+              ) : d.sectorId ? (
+                <>Picked by you. The title and notes will not change it.</>
+              ) : (
+                <>Type a title and the sector fills itself in from the title and notes.</>
+              )}
+            </span>
+          )}
         </div>
 
         <div className="bs-grid">
@@ -203,7 +257,7 @@ export default function BlockSheet({
 
         <label className="field">
           <span className="field-label">Notes</span>
-          <textarea className="textarea" rows={3} value={d.notes} maxLength={5000} placeholder="Anything to remember for this time" onChange={(e) => set({ notes: e.target.value })} />
+          <textarea className="textarea" rows={3} value={d.notes} maxLength={5000} placeholder="Details, agenda, anything to remember. Also used to file it in the right sector." onChange={(e) => set({ notes: e.target.value })} />
         </label>
 
         {error && (

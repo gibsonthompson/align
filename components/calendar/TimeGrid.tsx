@@ -9,8 +9,10 @@ import type { SectorLookup } from '@/components/ObjectRow';
 import {
   blockTitle,
   clamp,
-  DAY_MIN,
   dayNum,
+  VIEW_END,
+  VIEW_HOURS,
+  VIEW_START,
   DRAG_MIME,
   layoutDay,
   SNAP,
@@ -31,8 +33,8 @@ export interface TimeGridProps {
   dueByDay: Map<string, CalendarNode[]>;
   eventsByDay: Map<string, CalendarNode[]>;
   lookup: SectorLookup;
-  hourPx: number;
-  quarters: boolean; // label every 15 minutes (day view)
+  minHourPx: number; // below this the grid scrolls instead of shrinking
+  quarters: boolean; // 15-minute lines and labels (day view)
   dragPage: DragPage | null;
   busyIds: Set<string>;
   onCreate: (r: { date: string; start: number; end: number }) => void;
@@ -45,7 +47,7 @@ export interface TimeGridProps {
 }
 
 export default function TimeGrid(props: TimeGridProps) {
-  const { days, today, nowMin, blocks, dueByDay, eventsByDay, lookup, hourPx, quarters, dragPage, busyIds } = props;
+  const { days, today, nowMin, blocks, dueByDay, eventsByDay, lookup, minHourPx, quarters, dragPage, busyIds } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const colsRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Preview>(null);
@@ -53,17 +55,38 @@ export default function TimeGrid(props: TimeGridProps) {
   const [dropAt, setDropAt] = useState<{ date: string; s: number; e: number } | null>(null);
   const dragging = useRef(false);
   const single = days.length === 1;
-  const height = (DAY_MIN / 60) * hourPx;
-  const px = (min: number) => (min / 60) * hourPx;
-
-  // Start the view at the current hour (today) or at 7 AM, once per set of days.
-  const key = days.join(',');
+  // The grid fills the space left on screen, so 5 AM to 11 PM shows without scrolling.
+  const [hourPx, setHourPx] = useState(minHourPx);
+  const [boxH, setBoxH] = useState<number | null>(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const focus = days.includes(today) ? Math.max(0, nowMin - 90) : 7 * 60;
+    const fit = () => {
+      // Leave room for the page's bottom padding so nothing below the grid scrolls.
+      const avail = Math.floor(window.innerHeight - el.getBoundingClientRect().top - 14);
+      const per = Math.floor((avail - 2) / VIEW_HOURS);
+      const next = Math.max(minHourPx, per);
+      setHourPx(next);
+      setBoxH(Math.max(240, Math.min(avail, next * VIEW_HOURS + 2)));
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [minHourPx]);
+  const height = VIEW_HOURS * hourPx;
+  const len = (min: number) => (min / 60) * hourPx;
+  const px = (min: number) => ((min - VIEW_START) / 60) * hourPx;
+  const showQuarters = quarters && hourPx >= 36;
+  const quarterLabels = quarters && hourPx >= 64;
+
+  // When the screen is too short to fit everything, start at the current hour.
+  const key = days.join(',');
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || el.scrollHeight <= el.clientHeight + 2) return;
+    const focus = days.includes(today) ? Math.max(VIEW_START, nowMin - 60) : 7 * 60;
     el.scrollTop = px(focus);
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [key, hourPx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const byDay = useMemo(() => {
     const m = new Map<string, CalBlock[]>();
@@ -82,7 +105,7 @@ export default function TimeGrid(props: TimeGridProps) {
     const r = colsRef.current!.getBoundingClientRect();
     const w = r.width / days.length;
     const i = clamp(Math.floor((x - r.left) / w), 0, days.length - 1);
-    return { date: days[i], min: clamp(((y - r.top) / hourPx) * 60, 0, DAY_MIN) };
+    return { date: days[i], min: clamp(VIEW_START + ((y - r.top) / hourPx) * 60, VIEW_START, VIEW_END) };
   }
 
   // Keeps a drag going when the pointer reaches the top or bottom edge.
@@ -100,7 +123,7 @@ export default function TimeGrid(props: TimeGridProps) {
     if (target.closest('.blk')) return;
     e.preventDefault();
     const p = locate(e.clientX, e.clientY);
-    const anchor = Math.min(snapDown(p.min), DAY_MIN - SNAP);
+    const anchor = Math.min(snapDown(p.min), VIEW_END - SNAP);
     let moved = false;
     let cur = { date: p.date, s: anchor, e: anchor + SNAP };
     dragging.current = true;
@@ -109,7 +132,7 @@ export default function TimeGrid(props: TimeGridProps) {
     const move = (ev: PointerEvent) => {
       autoScroll(ev.clientY);
       const q = locate(ev.clientX, ev.clientY);
-      const at = Math.min(snapDown(q.min), DAY_MIN - SNAP);
+      const at = Math.min(snapDown(q.min), VIEW_END - SNAP);
       if (at !== anchor) moved = true;
       cur = { date: p.date, s: Math.min(anchor, at), e: Math.max(anchor, at) + SNAP };
       setPreview({ mode: 'create', ...cur });
@@ -119,7 +142,7 @@ export default function TimeGrid(props: TimeGridProps) {
       setPreview(null);
       if (ev.type === 'pointercancel') return;
       // A plain click makes a 30 minute block.
-      const e2 = moved ? cur.e : Math.min(cur.s + 30, DAY_MIN);
+      const e2 = moved ? cur.e : Math.min(cur.s + 30, VIEW_END);
       props.onCreate({ date: cur.date, start: cur.s, end: e2 });
     };
     const cleanup = () => {
@@ -162,10 +185,10 @@ export default function TimeGrid(props: TimeGridProps) {
       autoScroll(ev.clientY);
       const q = locate(ev.clientX, ev.clientY);
       if (mode === 'move') {
-        const s = clamp(snapNear(q.min - offset), 0, DAY_MIN - len);
+        const s = clamp(snapNear(q.min - offset), VIEW_START, Math.max(VIEW_START, VIEW_END - len));
         cur = { date: q.date, s, e: s + len };
       } else {
-        cur = { date: b.date, s: b.s, e: clamp(snapNear(q.min), b.s + SNAP, DAY_MIN) };
+        cur = { date: b.date, s: b.s, e: clamp(snapNear(q.min), b.s + SNAP, VIEW_END) };
       }
       setPreview({ mode, id: b.id, ...cur });
     };
@@ -191,7 +214,7 @@ export default function TimeGrid(props: TimeGridProps) {
     if (dragging.current || e.pointerType !== 'mouse') return;
     if ((e.target as HTMLElement).closest('.blk')) return setHover(null);
     const p = locate(e.clientX, e.clientY);
-    const min = Math.min(snapDown(p.min), DAY_MIN - SNAP);
+    const min = Math.min(snapDown(p.min), VIEW_END - SNAP);
     if (!hover || hover.date !== p.date || hover.min !== min) setHover({ date: p.date, min });
   }
 
@@ -201,9 +224,9 @@ export default function TimeGrid(props: TimeGridProps) {
     e.dataTransfer.dropEffect = 'copy';
     autoScroll(e.clientY);
     const p = locate(e.clientX, e.clientY);
-    const len = dragPage?.minutes ?? 30;
-    const s = clamp(snapDown(p.min), 0, DAY_MIN - len);
-    if (!dropAt || dropAt.date !== p.date || dropAt.s !== s) setDropAt({ date: p.date, s, e: s + len });
+    const size = dragPage?.minutes ?? 30;
+    const s = clamp(snapDown(p.min), VIEW_START, Math.max(VIEW_START, VIEW_END - size));
+    if (!dropAt || dropAt.date !== p.date || dropAt.s !== s) setDropAt({ date: p.date, s, e: s + size });
   }
 
   function onDrop(e: React.DragEvent) {
@@ -215,7 +238,7 @@ export default function TimeGrid(props: TimeGridProps) {
     try {
       const page = JSON.parse(raw) as { id: string; title: string; type: string; minutes: number };
       const p = locate(e.clientX, e.clientY);
-      const s = clamp(snapDown(p.min), 0, DAY_MIN - page.minutes);
+      const s = clamp(snapDown(p.min), VIEW_START, Math.max(VIEW_START, VIEW_END - page.minutes));
       props.onDropPage(page, p.date, s);
     } catch {}
   }
@@ -224,9 +247,9 @@ export default function TimeGrid(props: TimeGridProps) {
     backgroundImage: [
       `linear-gradient(to bottom, var(--line) 1px, transparent 1px)`,
       `linear-gradient(to bottom, var(--cal-half) 1px, transparent 1px)`,
-      ...(quarters ? [`linear-gradient(to bottom, var(--cal-quarter) 1px, transparent 1px)`] : []),
+      ...(showQuarters ? [`linear-gradient(to bottom, var(--cal-quarter) 1px, transparent 1px)`] : []),
     ].join(','),
-    backgroundSize: [`100% ${hourPx}px`, `100% ${hourPx / 2}px`, ...(quarters ? [`100% ${hourPx / 4}px`] : [])].join(','),
+    backgroundSize: [`100% ${hourPx}px`, `100% ${hourPx / 2}px`, ...(showQuarters ? [`100% ${hourPx / 4}px`] : [])].join(','),
   } as React.CSSProperties;
 
   const planned = (d: string) => (byDay.get(d) ?? []).filter((b) => b.status !== 'skipped').reduce((m, b) => m + (b.e - b.s), 0);
@@ -262,6 +285,8 @@ export default function TimeGrid(props: TimeGridProps) {
           const due = dueByDay.get(d) ?? [];
           const limit = single ? 99 : 3;
           const all = [...ev.map((n) => ({ n, kind: 'event' as const })), ...due.map((n) => ({ n, kind: 'due' as const }))];
+          // Blocks entirely before 5 AM or after 11 PM still show, up here.
+          const outside = (byDay.get(d) ?? []).filter((b) => b.e <= VIEW_START || b.s >= VIEW_END);
           return (
             <div key={d} className="tg-allday-cell" data-today={d === today}>
               {all.slice(0, limit).map(({ n, kind }) => (
@@ -286,6 +311,15 @@ export default function TimeGrid(props: TimeGridProps) {
                   <span>{n.title}</span>
                 </Link>
               ))}
+              {outside.map((b) => (
+                <button key={`o:${b.id}`} type="button" className="chip" style={{ ['--c' as string]: b.sector_id ? (lookup[b.sector_id]?.colour ?? '#8a8a8a') : '#8a8a8a' }} onClick={() => props.onOpen(b)} title="Outside 5 AM to 11 PM">
+                  <i className="swatch" aria-hidden />
+                  <span className="mono" style={{ color: 'var(--text-3)', flex: 'none' }}>
+                    {clock(b.s, true)}
+                  </span>
+                  <span>{blockTitle(b)}</span>
+                </button>
+              ))}
               {all.length > limit && (
                 <button type="button" className="chip more" onClick={() => props.onOpenDay(d)}>
                   +{all.length - limit} more
@@ -296,24 +330,27 @@ export default function TimeGrid(props: TimeGridProps) {
         })}
       </div>
 
-      <div className="tg-scroll" ref={scrollRef}>
+      <div className="tg-scroll" ref={scrollRef} style={boxH ? { height: boxH, minHeight: 0 } : undefined}>
         <div className="tg-body" style={{ height }}>
           <div className="tg-gutter tg-hours" aria-hidden>
-            {Array.from({ length: 24 }, (_, h) => (
-              <div key={h} className="tg-hour" style={{ top: px(h * 60) }}>
-                {h > 0 && <span>{clock(h * 60, true).replace(/a$/, ' AM').replace(/p$/, ' PM')}</span>}
-                {quarters &&
-                  [15, 30, 45].map((q) => (
-                    <span key={q} className="tg-quarter" style={{ top: px(q) }}>
-                      :{q}
-                    </span>
-                  ))}
-              </div>
-            ))}
+            {Array.from({ length: VIEW_HOURS }, (_, i) => {
+              const h = VIEW_START / 60 + i;
+              return (
+                <div key={h} className="tg-hour" style={{ top: px(h * 60) }}>
+                  <span className={i === 0 ? 'tg-first' : undefined}>{clock(h * 60, true).replace(/a$/, ' AM').replace(/p$/, ' PM')}</span>
+                  {quarterLabels &&
+                    [15, 30, 45].map((q) => (
+                      <span key={q} className="tg-quarter" style={{ top: len(q) }}>
+                        :{q}
+                      </span>
+                    ))}
+                </div>
+              );
+            })}
           </div>
           <div className="tg-cols" ref={colsRef} onPointerLeave={() => setHover(null)}>
             {days.map((d) => {
-              const list = byDay.get(d) ?? [];
+              const list = (byDay.get(d) ?? []).filter((b) => b.e > VIEW_START && b.s < VIEW_END);
               return (
                 <div
                   key={d}
@@ -329,7 +366,7 @@ export default function TimeGrid(props: TimeGridProps) {
                   onDrop={onDrop}
                 >
                   {hover?.date === d && !preview && (
-                    <div className="tg-hover" style={{ top: px(hover.min), height: px(SNAP) }}>
+                    <div className="tg-hover" style={{ top: px(hover.min), height: len(SNAP) }}>
                       <span>{clock(hover.min)}</span>
                     </div>
                   )}
@@ -337,7 +374,12 @@ export default function TimeGrid(props: TimeGridProps) {
                     const pos = layouts.get(`${b.id}:${b.date}`) ?? { col: 0, cols: 1, span: 1 };
                     const moving = preview?.id === b.id;
                     const colour = b.sector_id ? (lookup[b.sector_id]?.colour ?? '#8a8a8a') : '#8a8a8a';
-                    const h = px(b.e - b.s);
+                    // Only the part inside 5 AM to 11 PM is drawn; a cut-off block opens on click instead of dragging.
+                    const vs = Math.max(b.s, VIEW_START);
+                    const ve = Math.min(b.e, VIEW_END);
+                    const cut = vs !== b.s || ve !== b.e;
+                    const piece = cut ? { ...b, clipped: true } : b;
+                    const h = len(ve - vs);
                     // Overlaps cascade: each block reaches past its own column and later ones sit on top.
                     const last = pos.col + pos.span >= pos.cols;
                     const reach = pos.cols > 1 && !last ? Math.min(pos.span * 1.7, pos.cols - pos.col) : pos.span;
@@ -348,16 +390,17 @@ export default function TimeGrid(props: TimeGridProps) {
                         data-status={b.status}
                         data-ghosted={moving}
                         data-short={h < 26}
+                        data-tiny={h < 15}
                         data-busy={busyIds.has(b.id)}
                         style={{
-                          top: px(b.s),
+                          top: px(vs),
                           height: Math.max(h - 2, 10),
                           left: `calc(${(pos.col / pos.cols) * 100}% + 2px)`,
                           width: `calc(${(100 * reach) / pos.cols}% - 4px)`,
                           zIndex: 2 + pos.col,
                           ['--c' as string]: colour,
                         }}
-                        onPointerDown={(e) => startMove(e, b, 'move')}
+                        onPointerDown={(e) => startMove(e, piece, 'move')}
                         role="button"
                         tabIndex={0}
                         aria-label={`${blockTitle(b)}, ${clock(b.s)} to ${clock(b.e)}`}
@@ -388,12 +431,12 @@ export default function TimeGrid(props: TimeGridProps) {
                           </span>
                         </div>
                         {/* Short blocks are all handle otherwise; resize those from the editor. */}
-                        {!b.clipped && h >= 22 && <div className="blk-resize" onPointerDown={(e) => startMove(e, b, 'resize')} aria-hidden />}
+                        {!piece.clipped && h >= 22 && <div className="blk-resize" onPointerDown={(e) => startMove(e, b, 'resize')} aria-hidden />}
                       </div>
                     );
                   })}
                   {preview && preview.date === d && (
-                    <div className="blk preview" data-mode={preview.mode} style={{ top: px(preview.s), height: Math.max(px(preview.e - preview.s) - 2, 10), left: 2, right: 2 }}>
+                    <div className="blk preview" data-mode={preview.mode} style={{ top: px(preview.s), height: Math.max(len(preview.e - preview.s) - 2, 8), left: 2, right: 2 }}>
                       <div className="blk-text">
                         <span className="blk-title">
                           {preview.id ? blockTitle(blocks.find((b) => b.id === preview.id) ?? { title: '', node: null }) : 'New block'}
@@ -405,7 +448,7 @@ export default function TimeGrid(props: TimeGridProps) {
                     </div>
                   )}
                   {dropAt && dropAt.date === d && (
-                    <div className="blk preview" data-mode="drop" style={{ top: px(dropAt.s), height: Math.max(px(dropAt.e - dropAt.s) - 2, 10), left: 2, right: 2 }}>
+                    <div className="blk preview" data-mode="drop" style={{ top: px(dropAt.s), height: Math.max(len(dropAt.e - dropAt.s) - 2, 8), left: 2, right: 2 }}>
                       <div className="blk-text">
                         <span className="blk-title">{dragPage?.title ?? 'Drop to schedule'}</span>
                         <span className="blk-time mono">
@@ -414,7 +457,7 @@ export default function TimeGrid(props: TimeGridProps) {
                       </div>
                     </div>
                   )}
-                  {d === today && (
+                  {d === today && nowMin >= VIEW_START && nowMin <= VIEW_END && (
                     <div className="tg-now" style={{ top: px(nowMin) }} aria-hidden>
                       <i />
                     </div>

@@ -17,6 +17,8 @@ import CalendarSide from '@/components/calendar/CalendarSide';
 import BlockSheet from '@/components/calendar/BlockSheet';
 import {
   DAY_MIN,
+  VIEW_END,
+  VIEW_START,
   daysBetween,
   longDate,
   monthTitle,
@@ -94,10 +96,11 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
   // Next open slot on a day, from a starting minute, for something this long.
   function freeSlot(date: string, len: number, fromMin: number): number {
     const taken = placeBlocks(blocks, [date]).filter((b) => b.status !== 'skipped');
-    for (let m = Math.ceil(fromMin / SNAP) * SNAP; m + len <= 22 * 60; m += SNAP) {
+    const first = Math.max(VIEW_START, Math.ceil(fromMin / SNAP) * SNAP);
+    for (let m = first; m + len <= VIEW_END; m += SNAP) {
       if (!taken.some((b) => m < b.e && m + len > b.s)) return m;
     }
-    return Math.min(Math.ceil(fromMin / SNAP) * SNAP, DAY_MIN - len);
+    return Math.min(first, VIEW_END - len);
   }
 
   function scheduleDraft(n: Pick<CalendarNode, 'id' | 'title' | 'type' | 'effort_minutes'>, date?: string) {
@@ -211,12 +214,12 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
 
   async function save(d: Draft): Promise<string | null> {
     if (d.id) {
-      const res = await updateBlock(d.id, { title: d.title, notes: d.notes, nodeId: d.nodeId, sectorId: d.nodeId ? undefined : d.sectorId, date: d.date, start: d.start, end: d.end, status: d.status });
+      const res = await updateBlock(d.id, { title: d.title, notes: d.notes, nodeId: d.nodeId, sectorId: d.nodeId ? undefined : d.sectorId, sectorAuto: d.sectorAuto, date: d.date, start: d.start, end: d.end, status: d.status });
       if (!res.ok) return res.error;
       const node = d.nodeId ? { id: d.nodeId, title: d.nodeTitle ?? '', type: (d.nodeType ?? 'action') as NodeType, status: 'active' as const, effort_minutes: null, done_criteria: '' } : null;
       setBlocks((list) => list.map((x) => (x.id === d.id ? { ...res.data!.block, node } : x)));
     } else {
-      const res = await createBlock({ nodeId: d.nodeId, sectorId: d.nodeId ? null : d.sectorId, title: d.title, notes: d.notes, date: d.date, start: d.start, end: d.end });
+      const res = await createBlock({ nodeId: d.nodeId, sectorId: d.nodeId ? null : d.sectorId, sectorAuto: d.sectorAuto, title: d.title, notes: d.notes, date: d.date, start: d.start, end: d.end });
       if (!res.ok) return res.error;
       const node = d.nodeId ? { id: d.nodeId, title: d.nodeTitle ?? '', type: (d.nodeType ?? 'action') as NodeType, status: 'active' as const, effort_minutes: null, done_criteria: '' } : null;
       setBlocks((list) => [...list, { ...res.data!.block, node }]);
@@ -267,6 +270,7 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
       end: b.e,
       status: b.status,
       sectorId: b.sector_id,
+      sectorAuto: Boolean(b.sector_auto),
     });
   }
 
@@ -395,7 +399,7 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
               dueByDay={dueByDay}
               eventsByDay={eventsByDay}
               lookup={lookup}
-              hourPx={view === 'day' ? 72 : 48}
+              minHourPx={view === 'day' ? 30 : 26}
               quarters={view === 'day'}
               dragPage={dragPage}
               busyIds={busy}
@@ -408,12 +412,7 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
               onDragPage={setDragPage}
             />
           )}
-          <p className="cal-hint">
-            {view === 'month'
-              ? 'Click a day to add a block, click its number to open it. Drag a page from To Schedule onto a day to set its due date.'
-              : 'Drag on the grid to block out time. Drag a block to move it, its bottom edge to resize it. Drag a page from To Schedule onto a time.'}{' '}
-            <span className="mono">D W M</span> switch views, <span className="mono">T</span> today, <span className="mono">N</span> new block.
-          </p>
+
         </div>
         <CalendarSide
           anchor={anchor}
@@ -427,6 +426,11 @@ export default function Calendar({ data, explicitView, scheduleNode }: { data: C
           onPick={(d) => go(view, d)}
           onSchedule={(n) => scheduleDraft(n)}
           onDragPage={setDragPage}
+          hint={
+            view === 'month'
+              ? 'Click a day to add a block, or its number to open it. Drag a page from To Schedule onto a day to set its due date.'
+              : 'Drag on the grid to block out time. Drag a block to move it, its bottom edge to resize it. Drag a page from To Schedule onto a time.'
+          }
         />
       </div>
 

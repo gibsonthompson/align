@@ -189,6 +189,7 @@ export interface Block {
   id: string;
   node_id: string | null;
   sector_id: string | null;
+  sector_auto?: boolean;
   title: string;
   notes: string;
   start_at: string;

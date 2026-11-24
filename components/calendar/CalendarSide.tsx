@@ -23,6 +23,7 @@ export default function CalendarSide({
   onPick,
   onSchedule,
   onDragPage,
+  hint,
 }: {
   anchor: string;
   today: string;
@@ -35,6 +36,7 @@ export default function CalendarSide({
   onPick: (date: string) => void;
   onSchedule: (n: CalendarNode) => void;
   onDragPage: (p: DragPage | null) => void;
+  hint: string;
 }) {
   return (
     <aside className="cal-side">
@@ -89,6 +91,9 @@ export default function CalendarSide({
         )}
       </section>
       <Balance blocks={blocks} sectors={sectors} />
+      <p className="cal-hint">
+        {hint} <span className="mono">D W M</span> switch views, <span className="mono">T</span> today, <span className="mono">N</span> new block.
+      </p>
     </aside>
   );
 }

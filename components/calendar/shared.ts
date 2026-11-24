@@ -4,6 +4,10 @@ import type { Block, BlockStatus } from '@/lib/types';
 
 export const SNAP = 15; // minutes
 export const DAY_MIN = 1440;
+// The hours the time grid shows: 5 AM to 11 PM, all on screen at once.
+export const VIEW_START = 5 * 60;
+export const VIEW_END = 23 * 60;
+export const VIEW_HOURS = (VIEW_END - VIEW_START) / 60;
 
 // A block placed on one day of the grid, in wall-clock minutes.
 export interface CalBlock extends Block {
@@ -26,6 +30,8 @@ export interface Draft {
   end: number;
   status: BlockStatus;
   sectorId: string | null;
+  // True while the sector is a guess from the words, so it keeps following them.
+  sectorAuto?: boolean;
 }
 
 // Splits blocks into per-day pieces for the visible days.

@@ -11,6 +11,7 @@ import { createSession, SESSION_COOKIE, sessionCookieOptions } from '@/lib/sessi
 import { cleanBody, cleanLink, cleanText, isId, slugify } from '@/lib/ids';
 import { addDaysISO, isISODate, todayISO } from '@/lib/format';
 import { placeHabitSessions, type PlaceResult } from '@/lib/progress';
+import { guessSector, type SectorGuess } from '@/lib/classify';
 import { zonedToUtc } from '@/lib/tz';
 import { BLOCK_COLS } from '@/lib/calendar';
 import { NODE_KINDS, PERIOD_TYPES, SECTOR_ICON_NAMES } from '@/lib/kinds';
@@ -713,6 +714,7 @@ function blockTimes(date: unknown, start: unknown, end: unknown): { start_at: st
 export async function createBlock(input: {
   nodeId?: string | null;
   sectorId?: string | null;
+  sectorAuto?: boolean;
   title?: string;
   notes?: string;
   date: string;
@@ -731,10 +733,19 @@ export async function createBlock(input: {
     if (!node || node.archived) return err('That page no longer exists.');
   }
   const status = BLOCK_STATUSES.includes(input.status as BlockStatus) ? input.status : 'planned';
-  const sectorId = !nodeId && input.sectorId && isId(input.sectorId) ? input.sectorId : null;
+  let sectorId = !nodeId && input.sectorId && isId(input.sectorId) ? input.sectorId : null;
+  let sectorAuto = Boolean(input.sectorAuto) && Boolean(sectorId);
+  // Standalone time with no sector picked gets one guessed from its words.
+  if (!nodeId && !sectorId) {
+    const guess = await guessSector(title, input.notes ?? '', { allowAi: true }).catch(() => null);
+    if (guess && guess.confidence !== 'low') {
+      sectorId = guess.sectorId;
+      sectorAuto = true;
+    }
+  }
   const { data, error } = await db()
     .from('align_blocks')
-    .insert({ node_id: nodeId, sector_id: sectorId, title, notes: cleanBody(input.notes ?? '', 5000), status, ...times })
+    .insert({ node_id: nodeId, sector_id: sectorId, sector_auto: sectorAuto, title, notes: cleanBody(input.notes ?? '', 5000), status, ...times })
     .select(BLOCK_COLS)
     .single();
   if (error || !data) return err(dbError(error, 'Could not add it to the calendar. Try again.'));
@@ -744,7 +755,7 @@ export async function createBlock(input: {
 
 export async function updateBlock(
   id: string,
-  patch: { title?: string; notes?: string; nodeId?: string | null; sectorId?: string | null; date?: string; start?: number; end?: number; status?: BlockStatus },
+  patch: { title?: string; notes?: string; nodeId?: string | null; sectorId?: string | null; sectorAuto?: boolean; date?: string; start?: number; end?: number; status?: BlockStatus },
 ): Promise<ActionResult<{ block: Block }>> {
   if (!(await hasSession())) return err(SIGNED_OUT);
   if (!isId(id)) return err('That block is gone. Reload the calendar.');
@@ -763,6 +774,17 @@ export async function updateBlock(
   if (patch.sectorId !== undefined) {
     if (patch.sectorId !== null && !isId(patch.sectorId)) return err('Unknown sector.');
     row.sector_id = patch.sectorId;
+    row.sector_auto = Boolean(patch.sectorAuto) && patch.sectorId !== null;
+  } else if (patch.title !== undefined || patch.notes !== undefined) {
+    // A guessed sector follows the words; one he picked stays put.
+    const { data: cur } = await db().from('align_blocks').select('node_id, sector_id, sector_auto, title, notes').eq('id', id).maybeSingle();
+    if (cur && !cur.node_id && row.node_id === undefined && (cur.sector_auto || !cur.sector_id)) {
+      const guess = await guessSector((row.title as string | undefined) ?? (cur.title as string), (row.notes as string | undefined) ?? (cur.notes as string), { allowAi: true }).catch(() => null);
+      if (guess && guess.confidence !== 'low' && guess.sectorId !== cur.sector_id) {
+        row.sector_id = guess.sectorId;
+        row.sector_auto = true;
+      }
+    }
   }
   if (patch.date !== undefined || patch.start !== undefined || patch.end !== undefined) {
     const times = blockTimes(patch.date, patch.start, patch.end);
@@ -983,4 +1005,17 @@ export async function deleteMeasureLog(id: string): Promise<ActionResult> {
   if (error) return err(dbError(error, 'Could not remove it. Try again.'));
   refresh();
   return { ok: true };
+}
+
+// Live suggestion while typing a block's title and notes.
+export async function suggestSector(title: string, notes: string): Promise<ActionResult<SectorGuess | null>> {
+  if (!(await hasSession())) return err(SIGNED_OUT);
+  const t = cleanText(title, 300);
+  const n = cleanBody(notes ?? '', 2000);
+  if (t.length < 2 && n.length < 4) return { ok: true, data: null };
+  try {
+    return { ok: true, data: await guessSector(t, n, { allowAi: true }) };
+  } catch {
+    return { ok: true, data: null };
+  }
 }
