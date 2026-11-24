@@ -3,6 +3,11 @@ import { db } from '@/lib/db';
 import { NODE_KINDS } from '@/lib/kinds';
 import { isISODate, todayISO } from '@/lib/format';
 import type { AlignNode, BrainMessage, BrainReply, Fact, NodeType, ObjectType, Sector } from '@/lib/types';
+import { FACT_COLS, factLine, factState, getLifestyle } from '@/lib/profile';
+import { healthLines, planHealth } from '@/lib/capacity';
+import { getHabits, getMeasures } from '@/lib/progress';
+import { fmtValue, MODEL_STATUS_LABEL } from '@/lib/habits';
+import { reviewEvidence } from '@/lib/review';
 
 // The planning brain. Reads the whole path above a page, what is already under
 // it and what it knows about Gibson, then either asks what only he can answer
@@ -20,14 +25,18 @@ export function brainConfigured(): boolean {
 
 // What may sit directly under each kind of page.
 export function nextTypes(objectType: ObjectType, nodeType?: NodeType): NodeType[] {
-  if (objectType === 'sector') return ['vision', 'milestone', 'objective', 'project', 'micro_goal'];
+  if (objectType === 'sector') return ['vision', 'milestone', 'objective', 'project', 'micro_goal', 'experiment'];
   switch (nodeType) {
     case 'vision':
       return ['milestone', 'project'];
     case 'milestone':
-      return ['objective', 'month', 'project'];
+      return ['objective', 'strategy', 'month', 'project'];
     case 'objective':
-      return ['month', 'week', 'commitment', 'action', 'project'];
+      return ['strategy', 'experiment', 'month', 'week', 'commitment', 'action', 'project'];
+    case 'strategy':
+      return ['experiment', 'month', 'week', 'commitment', 'action', 'project', 'task'];
+    case 'experiment':
+      return ['week', 'commitment', 'action', 'task'];
     case 'month':
       return ['week', 'commitment', 'action'];
     case 'week':
@@ -47,36 +56,52 @@ export function nextTypes(objectType: ObjectType, nodeType?: NodeType): NodeType
   }
 }
 
-const SYSTEM = `You are the planning brain inside Align, Gibson's personal life operating system.
+const SYSTEM = `You are the planning brain inside Align, Gibson's personal life operating system. You are a strategic life architect, not a task generator. The point of Align is a fulfilling life: productivity, money and goals are means, not the measure of him. Protect time for leisure, relationships, exploration, rest and unstructured enjoyment.
 
-Your job is to reverse-engineer what he wants out of life into a chain of pages that ends in actions he can do today without having to think. The structure is:
-Five-Year Vision, then 12-Month Milestone, then 90-Day Objective, then Month, then Week, then Daily Action, then Task.
-Projects split into Phases (or Months and Weeks), then Tasks. Micro Goals split into Actions or Tasks.
-A Month and a Week are specific stretches of the calendar inside a plan ("Month 2: build to 20 miles a week", "Week of Dec 7: 3 runs, 14 miles"). They carry start_date (a Monday for weeks, the 1st or the plan's start for months) and the end date fills in. A Weekly Commitment is different: a recurring habit with a cadence ("run 3 times a week") that holds week after week. Use Months and Weeks when a goal has a date and needs to build progressively toward it (a race, an exam, a launch, a savings target). Use Weekly Commitments for steady habits with no finish date.
-Any page can also be a real event: event_date (the day it happens), location, cost in dollars, and link_url (the sign-up or info page).
+THE STRUCTURE
+Five-Year Vision, then 12-Month Milestone, then 90-Day Objective, then Strategy, then the work (Months and Weeks, Weekly Commitments, Daily Actions, Tasks). Projects split into Phases (or Months and Weeks) and Tasks. Micro Goals split into Actions or Tasks. Not every goal needs every level.
+- A Strategy is one way of reaching the goal above it, with a rationale: why it should work. A goal can hold several; any one can be replaced without restructuring the rest.
+- An Experiment is a strategy on trial when the best route is uncertain: a hypothesis, a fixed window (start_date to due_date, usually 2 to 6 weeks), success_criteria it is judged by, and a review_date.
+- A Month and a Week are dated stretches of a plan that builds toward a deadline. A Weekly Commitment is a recurring routine with a cadence and no end. Prefer a Weekly Commitment or routine over a pile of Daily Actions when the work repeats.
+- Any page can be a real event: event_date, location, cost and link_url.
 
-How you work, every time:
-1. Read the whole path from the sector down to the current page. Every layer you propose must be strictly more specific than the current page and must clearly serve everything above it.
-2. Narrow by choosing. Each step down picks one concrete thing: which skill, which song, which section of it, which tool, which number, which day. Example chain: "Get good at guitar" leads to "Learn songs I love, start to finish", which leads to "Learn Wonderwall by Oasis", which leads to "Practice the verse strumming pattern 4 times a week", which leads to "Play bars 1 to 8 of the Wonderwall verse with a metronome at 60 BPM until 3 clean run-throughs in a row, then raise it to 66 BPM".
-3. Never invent his preferences, level, equipment, budget, schedule or constraints. If the right next layer depends on a choice only he can make (for example which songs he actually likes, what he can already play, whether he owns a metronome app, how many minutes he has on weekdays), ask before proposing. Ask at most 3 questions per turn, and only questions whose answers would change what you propose. Give 2 to 6 short concrete options for each when that makes answering fast, and always allow his own answer.
-4. Use the known facts. Never ask something the facts or the conversation already answer.
-5. The actionable test for a Daily Action or Task: it fits in one sitting (90 minutes or less), starts with a verb, names the exact object (the specific song, section, page, person, file, exercise, amount), names the method or tool when it matters, and has a measurable done criterion (reps, tempo, count, minutes, a finished artifact, a sent message). Something like "Focus on the G to C transition" fails: no exact object, no method, no finish line.
-6. If the current page already passes the actionable test (or is a Weekly Commitment whose actions already pass it), set actionable to true and say so. Only propose more if splitting it would genuinely help.
-7. Otherwise propose 2 to 7 pages for the NEXT layer only, using only the allowed types you are given. Each needs a short title (no trailing period), a one or two sentence body describing what it looks like when it is real, a done criterion, effort_minutes for actions and tasks (null otherwise), and a cadence for weekly commitments (for example "4 times a week, 20 minutes", empty otherwise). Do not repeat pages that already exist under the current page.
-8. If the current page is vague, mixes several goals, or has an unrealistic timeline, say so plainly in the assessment and propose the split or the fix.
-9. Put any durable fact you learned from his answers in facts_learned, written as a plain statement about him ("Likes Oasis and Tom Petty", "Owns an acoustic guitar, no amp", "Has 30 minutes on weekday evenings"). Leave it empty when there is nothing new.
-10. Dates. Work backward from any event_date or due_date above this page. When you propose Months or Weeks, give every one a start_date and due_date that fit inside the parent and lead up to the deadline without gaps, and title them by what changes that period ("Week 6: first 8 mile long run"). When you propose Daily Actions inside a Week, date each one (due_date) on a sensible day of that week. Leave dates empty when there is no deadline to work back from.
-11. gap: one sentence on what still stands between this page and something he can do today. Empty when actionable.
+HOW YOU THINK, EVERY TURN
+1. Understand. Read the whole path above this page, what is already under it, the profile facts, the lifestyle vision, the capacity picture, the measures and what is planned in other sectors. Facts marked ASSUMED or possibly out of date are not settled: confirm them before building on them when they matter.
+2. Diagnose. Name the real underlying objective behind the page. Ask whether the proposed route attacks the root problem, whether a simpler or more enjoyable route exists, what it costs in time, money and energy, what it depends on, and what will get in the way. Put this in critique. Challenge his assumptions constructively and plainly; do not simply accept the strategy implied by the page.
+3. Strategize. When there are genuinely different routes, propose two or three Strategies (or an Experiment when the best one is unclear) with a rationale for each, instead of jumping straight to tasks. Favor environmental design and routines that make the behavior part of his normal life over plans that rely on motivation and discipline.
+4. Calculate. For a goal with a number, reverse-engineer it: baseline, target, the variables that drive it, the required rate, and realistic allowances for attrition, uncertainty, compounding and nonlinear growth. Never just divide an annual number into equal weeks. State the assumptions. Give conservative, realistic and ambitious scenarios when useful. For qualitative goals, plan controllable behaviors and periodic evaluation instead.
+5. Validate against capacity. Check the capacity picture and everything already planned. Do not propose work that is reasonable alone but impossible together, and keep unplanned buffer intact. If the plan does not fit, say so in capacity_note and propose the trade-off (what to drop, defer or shrink), not more workload.
+6. Cross-sector. Look for one activity that serves several sectors (a run club serves fitness, friendship and community). Never propose a page that duplicates something already planned elsewhere; say to link the existing one instead. Name real conflicts between sectors.
+7. Ask what only he can answer. If the right next layer depends on his preferences, level, gear, budget, schedule or constraints and the facts do not cover it, ask first. At most 3 questions per turn, only ones whose answers change the plan, with 2 to 6 short concrete options when that speeds answering. Include discovery: when it would help, ask one adaptive question that could surface an overlooked goal, problem or opportunity, or the gap between how he lives now and how he wants to live.
+8. Propose the next layer only, 2 to 7 pages of the allowed types, never repeating what exists.
 
-Style: plain, direct, specific. No hype, no motivational filler. Never use the words "tackle" or "tackling". Never use em dashes. Titles in sentence case.`;
+QUALITY OF WHAT YOU PROPOSE
+- Every Daily Action or Task: starts with a verb, names the exact object, names the method or tool when it matters, fits one sitting (90 minutes or less), has a measurable done criterion, effort_minutes, a sensible date, and serves the page above. "Work on business" or "get better at networking" never pass. Example: "Play bars 1 to 8 of the Wonderwall verse with a metronome at 60 BPM until 3 clean run-throughs, then raise it to 66".
+- Strategy: title names the approach, rationale says why it should move the goal, done_criteria says what success looks like, review_date when to judge it (usually 2 to 6 weeks out).
+- Experiment: hypothesis ("If I do X for N weeks, Y will improve by Z"), start_date and due_date for the window, success_criteria to judge it, review_date (the day after it ends).
+- Weekly Commitment: cadence like "3 times a week, 45 minutes".
+- Dates: work backward from any event_date or due_date above. Months and Weeks get start_date and due_date that fit inside the parent with no gaps, titled by what changes that period. Actions inside a Week get a due_date on a sensible day. No deadline above means no invented dates.
+- Never invent venues, events, prices, schedules or facts. When something real is needed (a race, a class, a price), propose an action to look it up, or ask.
+
+REPORTING
+- assessment: two to four sentences on where this page stands and what you are doing this turn.
+- critique: the honest read on the approach (real objective, root problem, better or simpler routes, risks). Empty only when there is nothing worth challenging.
+- capacity_note: whether this fits the time, money and energy he has. Empty when capacity is not relevant to this page.
+- actionable: true when the page already passes the test above (or is a commitment whose actions do); then propose more only if splitting genuinely helps.
+- gap: one sentence on what still stands between this page and something he can do today. Empty when actionable.
+- facts_learned: durable facts from his answers, as plain statements ("Has 30 minutes on weekday evenings"). Temporary circumstances only when they matter, saying they are temporary. Empty when nothing new.
+
+Style: plain, direct, specific. No hype or motivational filler. Never use the words "tackle" or "tackling". Never use em dashes. Titles in sentence case.`;
 
 function schema(allowed: NodeType[]) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['assessment', 'actionable', 'gap', 'questions', 'proposals', 'facts_learned'],
+    required: ['assessment', 'critique', 'capacity_note', 'actionable', 'gap', 'questions', 'proposals', 'facts_learned'],
     properties: {
       assessment: { type: 'string', description: 'Two to four sentences: where this page stands and what you are doing this turn.' },
+      critique: { type: 'string', description: 'The honest read on the approach: real objective, root problem, better or simpler routes, risks. Empty if nothing to challenge.' },
+      capacity_note: { type: 'string', description: 'Whether this fits his time, money and energy, and the trade-off if not. Empty if not relevant.' },
       actionable: { type: 'boolean' },
       gap: { type: 'string' },
       questions: {
@@ -99,7 +124,7 @@ function schema(allowed: NodeType[]) {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['type', 'title', 'body', 'done_criteria', 'effort_minutes', 'cadence', 'start_date', 'due_date', 'why'],
+          required: ['type', 'title', 'body', 'done_criteria', 'effort_minutes', 'cadence', 'start_date', 'due_date', 'rationale', 'hypothesis', 'success_criteria', 'review_date', 'why'],
           properties: {
             type: { type: 'string', enum: allowed },
             title: { type: 'string' },
@@ -109,6 +134,10 @@ function schema(allowed: NodeType[]) {
             cadence: { type: 'string' },
             start_date: { type: ['string', 'null'], description: 'YYYY-MM-DD or null' },
             due_date: { type: ['string', 'null'], description: 'YYYY-MM-DD or null' },
+            rationale: { type: 'string', description: 'Strategy: why this should move the goal. Empty otherwise.' },
+            hypothesis: { type: 'string', description: 'Experiment: if I do X for N weeks, Y will change by Z. Empty otherwise.' },
+            success_criteria: { type: 'string', description: 'Experiment: how it is judged. Empty otherwise.' },
+            review_date: { type: ['string', 'null'], description: 'Strategy or experiment: YYYY-MM-DD to judge it. Null otherwise.' },
             why: { type: 'string', description: 'One short line on how this serves the page above it.' },
           },
         },
@@ -123,7 +152,7 @@ function schema(allowed: NodeType[]) {
 // ---------------------------------------------------------------------------
 
 type LineNode = Pick<AlignNode, 'type' | 'title' | 'body' | 'done_criteria' | 'cadence' | 'effort_minutes' | 'status' | 'due_date'> &
-  Partial<Pick<AlignNode, 'start_date' | 'event_date' | 'location' | 'cost' | 'link_url'>>;
+  Partial<Pick<AlignNode, 'start_date' | 'event_date' | 'location' | 'cost' | 'link_url' | 'rationale' | 'hypothesis' | 'success_criteria' | 'review_date' | 'verdict' | 'verdict_note'>>;
 
 function line(n: LineNode): string {
   const bits = [`[${NODE_KINDS[n.type]?.label ?? n.type}] ${n.title}`];
@@ -139,6 +168,11 @@ function line(n: LineNode): string {
   if (n.done_criteria?.trim()) out += `\n   Done when: ${n.done_criteria.trim()}`;
   if (n.cadence?.trim()) out += `\n   Cadence: ${n.cadence.trim()}`;
   if (n.effort_minutes) out += `\n   Effort: ${n.effort_minutes} min`;
+  if (n.rationale?.trim()) out += `\n   Why it should work: ${n.rationale.trim().slice(0, 600)}`;
+  if (n.hypothesis?.trim()) out += `\n   Hypothesis: ${n.hypothesis.trim().slice(0, 400)}`;
+  if (n.success_criteria?.trim()) out += `\n   Judged by: ${n.success_criteria.trim().slice(0, 400)}`;
+  if (n.review_date) out += `\n   Review on: ${n.review_date}`;
+  if (n.verdict) out += `\n   Last verdict: ${n.verdict}${n.verdict_note?.trim() ? ` (${n.verdict_note.trim().slice(0, 300)})` : ''}`;
   return out;
 }
 
@@ -157,8 +191,9 @@ export async function loadFacts(target: BrainTarget): Promise<Fact[]> {
   if (target.objectType === 'node') ors.push(`node_id.eq.${target.id}`);
   const { data } = await db()
     .from('align_facts')
-    .select('id, fact, source, sector_id, node_id, created_at')
+    .select(FACT_COLS)
     .eq('archived', false)
+    .eq('sensitive', false)
     .or(ors.join(','))
     .order('created_at')
     .limit(200);
@@ -176,7 +211,11 @@ async function buildContext(target: BrainTarget, facts: Fact[]): Promise<string>
         (top.importance || top.satisfaction || top.attention_needed
           ? `\nRatings (1 to 10): importance ${top.importance ?? '?'}, satisfaction ${top.satisfaction ?? '?'}, attention needed ${top.attention_needed ?? '?'}`
           : '') +
-        (top.mode ? `\nRight now this sector is: ${top.mode === 'priority' ? 'a current priority' : 'in maintain mode'}` : ''),
+        (top.mode ? `\nRight now this sector is: ${top.mode === 'priority' ? 'a current priority' : 'in maintain mode'}` : '') +
+        (top.current_state?.trim() ? `\nWhere it is now: ${top.current_state.trim().slice(0, 1200)}` : '') +
+        (top.desired_state?.trim() ? `\nWhere he wants it: ${top.desired_state.trim().slice(0, 1200)}` : '') +
+        (top.weekly_hours !== null && top.weekly_hours !== undefined ? `\nTime budget: ${top.weekly_hours} hours a week` : '') +
+        (top.monthly_budget !== null && top.monthly_budget !== undefined ? `\nMoney budget: $${top.monthly_budget} a month` : ''),
     );
   }
 
@@ -189,7 +228,7 @@ async function buildContext(target: BrainTarget, facts: Fact[]): Promise<string>
     while (cur?.parent_id && guard++ < 64) {
       const { data } = await db()
         .from('align_nodes')
-        .select('id, type, title, body, done_criteria, cadence, effort_minutes, status, start_date, due_date, event_date, location, cost, link_url, parent_id')
+        .select('id, type, title, body, done_criteria, cadence, effort_minutes, status, start_date, due_date, event_date, location, cost, link_url, parent_id, rationale, hypothesis, success_criteria, review_date, verdict, verdict_note')
         .eq('id', cur.parent_id)
         .maybeSingle();
       if (!data) break;
@@ -200,7 +239,7 @@ async function buildContext(target: BrainTarget, facts: Fact[]): Promise<string>
     parts.push(`THIS PAGE:\n${line(target.node)}`);
 
     const [{ data: kids }, { data: sibs }] = await Promise.all([
-      db().from('align_nodes').select('type, title, body, done_criteria, cadence, effort_minutes, status, start_date, due_date, event_date, location, cost').eq('parent_id', target.id).eq('archived', false).order('sort').limit(60),
+      db().from('align_nodes').select('type, title, body, done_criteria, cadence, effort_minutes, status, start_date, due_date, event_date, location, cost, rationale, hypothesis, success_criteria, review_date, verdict').eq('parent_id', target.id).eq('archived', false).order('sort').limit(60),
       target.node.parent_id
         ? db().from('align_nodes').select('type, title, status').eq('parent_id', target.node.parent_id).eq('archived', false).neq('id', target.id).limit(30)
         : target.node.sector_id
@@ -225,8 +264,85 @@ async function buildContext(target: BrainTarget, facts: Fact[]): Promise<string>
       ? `ALREADY UNDER THIS PAGE:\n${children.map((n) => `- ${line(n).replace(/\n/g, '\n  ')}`).join('\n')}`
       : 'ALREADY UNDER THIS PAGE: nothing yet.',
   );
-  parts.push(facts.length ? `KNOWN FACTS ABOUT GIBSON:\n${facts.map((f) => `- ${f.fact}`).join('\n')}` : 'KNOWN FACTS ABOUT GIBSON: none yet.');
+  parts.push(facts.length ? `PROFILE FACTS ABOUT GIBSON:\n${facts.filter((f) => factState(f) !== 'expired').map((f) => `- ${factLine(f)}`).join('\n')}` : 'PROFILE FACTS ABOUT GIBSON: none yet.');
+  parts.push(...(await wideContext(target)));
   return parts.join('\n\n');
+}
+
+// Everything outside this page that should shape it: the lifestyle he is
+// building, his real capacity, the numbers, and what other sectors already hold.
+async function wideContext(target: BrainTarget): Promise<string[]> {
+  const out: string[] = [];
+  const safe = async <T,>(f: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await f();
+    } catch {
+      return null;
+    }
+  };
+  const [life, health, measures, habits, others, evidence] = await Promise.all([
+    safe(getLifestyle),
+    safe(() => planHealth()),
+    safe(getMeasures),
+    safe(getHabits),
+    safe(async () => {
+      const { data } = await db()
+        .from('align_nodes')
+        .select('id, type, title, sector_id, cadence')
+        .eq('archived', false)
+        .in('status', ['active', 'planned'])
+        .in('type', ['objective', 'strategy', 'experiment', 'commitment', 'project'])
+        .order('updated_at', { ascending: false })
+        .limit(80);
+      const { data: secs } = await db().from('align_sectors').select('id, name, parent_id');
+      const sec = new Map(((secs ?? []) as { id: string; name: string; parent_id: string | null }[]).map((x) => [x.id, x]));
+      const topName = (id: string | null) => {
+        let x = id ? sec.get(id) : undefined;
+        while (x?.parent_id) x = sec.get(x.parent_id);
+        return x?.name ?? 'Unfiled';
+      };
+      return ((data ?? []) as { id: string; type: NodeType; title: string; sector_id: string | null; cadence: string }[])
+        .filter((n) => n.id !== target.id)
+        .map((n) => `- [${NODE_KINDS[n.type]?.label}] ${n.title}${n.cadence ? ` (${n.cadence})` : ''}, in ${topName(n.sector_id)}`);
+    }),
+    target.node && (target.node.type === 'strategy' || target.node.type === 'experiment' || target.node.type === 'objective') ? safe(() => reviewEvidence(target.id)) : Promise.resolve(null),
+  ]);
+  if (life && (life.vision || life.non_negotiables.length)) {
+    out.push(
+      `THE LIFE HE IS BUILDING:${life.vision ? `\n${life.vision.slice(0, 2000)}` : ''}${life.non_negotiables.length ? `\nNon-negotiables: ${life.non_negotiables.join('; ')}` : ''}`,
+    );
+  }
+  if (health) out.push(`CAPACITY:\n${healthLines(health)}`);
+  if (measures?.length) {
+    const ids = new Set([target.id]);
+    const rel = measures.filter((m) => (m.node_id && ids.has(m.node_id)) || (!m.node_id && m.sector_id && m.sector_id === target.topSector?.id));
+    const show = (rel.length ? rel : measures).slice(0, 12);
+    out.push(
+      `${rel.length ? 'NUMBERS FOR THIS PAGE' : 'NUMBERS HE TRACKS'}:\n` +
+        show
+          .map((m) => {
+            const md = m.model;
+            const bits = [`- ${m.name}: ${fmtValue(m.stat.current, m.unit)} (${m.stat.periodLabel.toLowerCase()})`];
+            if (m.target_value !== null) bits.push(`target ${fmtValue(m.target_value, m.unit)}${m.target_date ? ` by ${m.target_date}` : ''}`);
+            if (md && md.status !== 'no_target') bits.push(MODEL_STATUS_LABEL[md.status].toLowerCase());
+            if (md?.ratePerWeek !== null && md?.ratePerWeek !== undefined) bits.push(`recent pace ${md.ratePerWeek.toFixed(2)}/week`);
+            if (md?.requiredPerWeek !== null && md?.requiredPerWeek !== undefined) bits.push(`needs ${md.requiredPerWeek.toFixed(2)}/week from here`);
+            if (md?.needsRecalc) bits.push('PLAN NEEDS RECALCULATING');
+            if (m.assumptions?.length) bits.push(`assumes: ${m.assumptions.map((a) => `${a.text}${a.confirmed ? '' : ' (unconfirmed)'}`).join('; ')}`);
+            return bits.join(', ');
+          })
+          .join('\n'),
+    );
+  }
+  if (habits?.length) out.push(`HABITS RUNNING:\n${habits.filter((h) => !h.paused).slice(0, 20).map((h) => `- ${h.node.title}: ${h.stat.weekDone} of ${h.stat.weekTarget} this week, streak ${h.stat.streak}`).join('\n')}`);
+  if (others?.length) out.push(`ALREADY PLANNED ELSEWHERE (do not duplicate; link instead):\n${others.slice(0, 60).join('\n')}`);
+  if (evidence)
+    out.push(
+      `HOW THIS IS GOING (${evidence.period.from} to ${evidence.period.to}): ${evidence.diagnosis}` +
+        (evidence.execution !== null ? ` Execution ${Math.round(evidence.execution * 100)}%.` : '') +
+        (evidence.previous_reviews.length ? ` Earlier verdicts: ${evidence.previous_reviews.map((r) => `${r.created_at.slice(0, 10)} ${r.verdict}`).join(', ')}.` : ''),
+    );
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +438,8 @@ const noDash = (s: string) => String(s ?? '').replace(/—/g, ', ').replace(/\s+
 function clean(r: BrainReply, allowed: NodeType[]): BrainReply {
   return {
     assessment: noDash(r.assessment).slice(0, 2000),
+    critique: noDash(r.critique ?? '').slice(0, 3000),
+    capacity_note: noDash(r.capacity_note ?? '').slice(0, 1500),
     actionable: Boolean(r.actionable),
     gap: noDash(r.gap).slice(0, 600),
     questions: (r.questions ?? []).slice(0, 3).map((q) => ({
@@ -341,6 +459,10 @@ function clean(r: BrainReply, allowed: NodeType[]): BrainReply {
         cadence: noDash(p.cadence).slice(0, 120),
         start_date: isISODate(p.start_date) ? p.start_date : null,
         due_date: isISODate(p.due_date) && !(isISODate(p.start_date) && p.start_date > p.due_date) ? p.due_date : null,
+        rationale: noDash(p.rationale ?? '').slice(0, 3000),
+        hypothesis: noDash(p.hypothesis ?? '').slice(0, 1500),
+        success_criteria: noDash(p.success_criteria ?? '').slice(0, 1500),
+        review_date: isISODate(p.review_date) ? p.review_date : null,
         why: noDash(p.why).slice(0, 400),
         status: 'open' as const,
         created_id: null,

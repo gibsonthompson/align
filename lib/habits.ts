@@ -1,6 +1,6 @@
 // Pure maths for habits and measures, shared by the server, the browser and ChatGPT's tools.
 import { addDaysISO, mondayOf } from '@/lib/format';
-import type { Habit, HabitLog, Measure, MeasureLog } from '@/lib/types';
+import type { Habit, HabitLog, Measure, MeasureCurve, MeasureLog } from '@/lib/types';
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -188,3 +188,136 @@ export function fmtValue(v: number | null, unit: string): string {
   if (unit === '$') return `${v < 0 ? '-' : ''}$${s.replace('-', '')}`;
   return unit ? `${s} ${unit}` : s;
 }
+
+// ---------------------------------------------------------------------------
+// The model behind a measure's target: where it should be by now on the chosen
+// curve, the pace actually happening, where that pace lands, and whether the
+// plan needs recalculating. Applies to levels and to running totals ("all").
+// ---------------------------------------------------------------------------
+
+export type ModelStatus = 'done' | 'ahead' | 'on_track' | 'behind' | 'off_track' | 'no_data' | 'no_target';
+
+export interface MeasureModel {
+  baseline: number | null;
+  baselineDate: string;
+  target: number | null;
+  targetDate: string | null;
+  curve: MeasureCurve;
+  actual: number | null;
+  expected: number | null; // where the curve says it should be today
+  status: ModelStatus;
+  ratePerWeek: number | null; // the recent actual pace
+  requiredPerWeek: number | null; // pace needed from here to hit the target on time
+  projected: number | null; // where the recent pace lands on the target date
+  weeksLeft: number | null;
+  needsRecalc: boolean;
+  scenarios: { name: string; value: number | null; note: string; onPace: boolean | null }[];
+}
+
+const DAY_MS = 86_400_000;
+const dayNum = (iso: string) => Math.round(new Date(`${iso}T12:00:00Z`).getTime() / DAY_MS);
+
+export function curveFraction(curve: MeasureCurve, t: number, base: number, target: number): number {
+  const x = Math.max(0, Math.min(1, t));
+  if (curve === 'front_loaded') return 1 - (1 - x) ** 2;
+  if (curve === 'back_loaded') return x ** 2;
+  if (curve === 'compound' && base > 0 && target > 0 && target !== base) return (base * (target / base) ** x - base) / (target - base);
+  return x;
+}
+
+export function measureModel(m: Measure, logs: MeasureLog[], today: string): MeasureModel {
+  const curve = (m.curve ?? 'linear') as MeasureCurve;
+  const cumulative = m.kind === 'total';
+  const sorted = [...logs].sort((a, b) => a.day.localeCompare(b.day) || a.created_at.localeCompare(b.created_at));
+  // One value per day: the last reading for levels, the running sum for totals.
+  const byDay = new Map<string, number>();
+  let run = 0;
+  for (const l of sorted) {
+    if (cumulative) {
+      run += Number(l.value);
+      byDay.set(l.day, run);
+    } else byDay.set(l.day, Number(l.value));
+  }
+  const points = [...byDay.entries()].map(([d, v]) => ({ d, v }));
+  const baselineDate = m.baseline_date ?? points[0]?.d ?? (m.created_at ?? '').slice(0, 10) ?? today;
+  const baseline = m.start_value !== null && m.start_value !== undefined ? Number(m.start_value) : cumulative ? 0 : (points[0]?.v ?? null);
+  const target = m.target_value !== null && m.target_value !== undefined ? Number(m.target_value) : null;
+  const actual = points.length ? points[points.length - 1].v : cumulative ? 0 : null;
+
+  // Recent pace: least squares over the last six weeks of readings.
+  const recent = points.filter((p) => dayNum(p.d) >= dayNum(today) - 42);
+  let ratePerWeek: number | null = null;
+  if (recent.length >= 2 && dayNum(recent[recent.length - 1].d) > dayNum(recent[0].d)) {
+    const xs = recent.map((p) => dayNum(p.d));
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = recent.reduce((a, p) => a + p.v, 0) / recent.length;
+    const num = recent.reduce((a, p, i) => a + (xs[i] - mx) * (p.v - my), 0);
+    const den = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+    if (den > 0) ratePerWeek = (num / den) * 7;
+  }
+
+  const scen = Object.entries(m.scenarios ?? {}).map(([name, s]) => ({ name, value: s?.value ?? null, note: s?.note ?? '', onPace: null as boolean | null }));
+  const base: MeasureModel = {
+    baseline,
+    baselineDate,
+    target,
+    targetDate: m.target_date,
+    curve,
+    actual,
+    expected: null,
+    status: 'no_target',
+    ratePerWeek,
+    requiredPerWeek: null,
+    projected: null,
+    weeksLeft: null,
+    needsRecalc: false,
+    scenarios: scen,
+  };
+  if (target === null || baseline === null) return base;
+  if (actual === null) return { ...base, status: 'no_data' };
+  const dir = target >= baseline ? 1 : -1;
+  if ((actual - target) * dir >= 0) return { ...base, status: 'done' };
+  if (!m.target_date) return { ...base, status: 'no_data' };
+
+  const span = dayNum(m.target_date) - dayNum(baselineDate);
+  const gone = dayNum(today) - dayNum(baselineDate);
+  const left = Math.max(0, dayNum(m.target_date) - dayNum(today));
+  const weeksLeft = left / 7;
+  const expected = span > 0 ? baseline + (target - baseline) * curveFraction(curve, gone / span, baseline, target) : target;
+  const requiredPerWeek = weeksLeft > 0 ? (target - actual) / weeksLeft : null;
+  const projected = ratePerWeek !== null ? actual + ratePerWeek * weeksLeft : null;
+  const scale = Math.abs(target - baseline) || 1;
+  const rel = ((actual - expected) * dir) / scale;
+  let status: ModelStatus = rel > 0.05 ? 'ahead' : rel >= -0.05 ? 'on_track' : rel >= -0.2 ? 'behind' : 'off_track';
+  // A strong recent pace that still lands on the target softens "off track".
+  const projectedHits = projected !== null && (projected - target) * dir >= 0;
+  if (status === 'off_track' && projectedHits) status = 'behind';
+  const needsRecalc = status === 'off_track' || (status === 'behind' && projected !== null && !projectedHits) || (left === 0 && (actual - target) * dir < 0);
+  return {
+    ...base,
+    expected,
+    status,
+    requiredPerWeek,
+    projected,
+    weeksLeft,
+    needsRecalc,
+    scenarios: scen.map((s) => ({ ...s, onPace: s.value === null || projected === null ? null : (projected - s.value) * dir >= 0 })),
+  };
+}
+
+export const MODEL_STATUS_LABEL: Record<ModelStatus, string> = {
+  done: 'Target reached',
+  ahead: 'Ahead of plan',
+  on_track: 'On plan',
+  behind: 'Behind plan',
+  off_track: 'Off plan',
+  no_data: 'Waiting for data',
+  no_target: 'No target',
+};
+
+export const CURVE_LABEL: Record<MeasureCurve, string> = {
+  linear: 'Steady',
+  front_loaded: 'Fast start',
+  back_loaded: 'Slow build',
+  compound: 'Compounding',
+};

@@ -16,6 +16,7 @@ import ActivitySection from '@/components/ActivitySection';
 import NodeSchedule from '@/components/NodeSchedule';
 import HabitPanel from '@/components/progress/HabitPanel';
 import MeasuresPanel from '@/components/progress/MeasuresPanel';
+import StrategyPanel from '@/components/plan/StrategyPanel';
 import { getNodeProgress } from '@/lib/progress';
 import { todayISO } from '@/lib/format';
 
@@ -26,7 +27,9 @@ const SCHEDULABLE = ['action', 'task', 'micro_goal', 'commitment', 'phase'];
 // Kinds that usually repeat, so they offer to become a habit.
 const HABIT_KINDS = ['commitment', 'micro_goal'];
 // Kinds that are outcomes, so they offer measures.
-const MEASURE_KINDS = ['vision', 'milestone', 'objective', 'month', 'week', 'commitment', 'project', 'micro_goal'];
+const MEASURE_KINDS = ['vision', 'milestone', 'objective', 'strategy', 'experiment', 'month', 'week', 'commitment', 'project', 'micro_goal'];
+// Kinds that get judged: their reasoning, review date and verdicts.
+const REVIEW_KINDS = ['strategy', 'experiment', 'objective'];
 // The brain can take a while to think.
 export const maxDuration = 120;
 
@@ -37,9 +40,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: page ? `${page.node.title} · Align` : 'Align' };
 }
 
-export default async function NodePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ brain?: string }> }) {
+export default async function NodePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ brain?: string; review?: string }> }) {
   const { id } = await params;
-  const { brain: brainParam } = await searchParams;
+  const { brain: brainParam, review: reviewParam } = await searchParams;
   if (!isId(id)) notFound();
   const page = await getNodePage(id);
   if (!page) notFound();
@@ -67,6 +70,9 @@ export default async function NodePage({ params, searchParams }: { params: Promi
         <div className="page">
           <div className="page-main">
             <NodeTitle key={node.id} node={node} />
+            {(REVIEW_KINDS.includes(node.type) || page.reviews.length > 0) && (node.type !== 'objective' || page.reviews.length > 0 || node.review_date || reviewParam === '1') ? (
+              <StrategyPanel key={`s-${node.id}`} node={node} reviews={page.reviews} autoReview={reviewParam === '1'} />
+            ) : null}
             {!node.archived && (
               <BrainPanel
                 key={`b-${node.id}`}

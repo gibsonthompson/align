@@ -475,9 +475,9 @@ export async function findObjects(query: string, types?: string[]): Promise<Acti
 // ---------------------------------------------------------------------------
 
 const SECTOR_COLS =
-  'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at';
+  'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at, current_state, desired_state, weekly_hours, monthly_budget';
 const NODE_COLS =
-  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state, event_date, link_url, location, cost';
+  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state, event_date, link_url, location, cost, rationale, hypothesis, success_criteria, review_date, verdict, verdict_note';
 
 async function loadTarget(type: ObjectType, id: string): Promise<BrainTarget | null> {
   const { data: sectors } = await db().from('align_sectors').select(SECTOR_COLS);
@@ -627,6 +627,10 @@ export async function brainAccept(
         cadence: cleanText(p.cadence ?? base.cadence, 120),
         start_date: start,
         due_date: due,
+        rationale: cleanBody(base.rationale ?? '', 5000),
+        hypothesis: cleanBody(base.hypothesis ?? '', 2000),
+        success_criteria: cleanBody(base.success_criteria ?? '', 2000),
+        review_date: isISODate(base.review_date) ? base.review_date : null,
         parent_id: target.node ? target.id : null,
         sector_id: target.node ? null : target.id,
         status: 'active',

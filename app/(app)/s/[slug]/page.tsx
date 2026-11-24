@@ -9,6 +9,7 @@ import BrainPanel from '@/components/BrainPanel';
 import AreasSection from '@/components/AreasSection';
 import ChildrenSection from '@/components/ChildrenSection';
 import LinksSection from '@/components/LinksSection';
+import SectorPlan from '@/components/plan/SectorPlan';
 import NotesSection from '@/components/NotesSection';
 import ActivitySection from '@/components/ActivitySection';
 
@@ -41,6 +42,7 @@ export default async function SectorPage({ params, searchParams }: { params: Pro
         <div className="page">
           <div className="page-main">
             <SectorTitle key={sector.id} sector={sector} isArea={isArea} pages={pages} />
+            {!isArea && <SectorPlan key={`sp-${sector.id}`} sector={sector} />}
             <BrainPanel
               key={`b-${sector.id}`}
               object={{ type: 'sector', id: sector.id }}

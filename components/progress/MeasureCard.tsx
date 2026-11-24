@@ -12,6 +12,7 @@ import type { Sector } from '@/lib/types';
 import type { SectorLookup } from '@/components/ObjectRow';
 import MeasureChart from '@/components/progress/MeasureChart';
 import MeasureForm from '@/components/progress/MeasureForm';
+import MeasureModel from '@/components/progress/MeasureModel';
 
 // One measure: where it stands, how far toward the target, its chart, and a quick log.
 export default function MeasureCard({ m, today, sectors, allSectors, showPage = true }: { m: MeasureRow; today: string; sectors: SectorLookup; allSectors?: Sector[]; showPage?: boolean }) {
@@ -117,9 +118,10 @@ export default function MeasureCard({ m, today, sectors, allSectors, showPage = 
           <span className="mono" style={{ fontSize: 11 }}>
             {Math.round(s.progress * 100)}%
           </span>
-          {s.onTrack !== null && <span className={`tag${s.onTrack ? ' good' : ' soon'}`}>{s.progress >= 1 ? 'Hit' : s.onTrack ? 'On track' : 'Behind'}</span>}
+          {s.onTrack !== null && !(m.model && m.model.status !== 'no_target') && <span className={`tag${s.onTrack ? ' good' : ' soon'}`}>{s.progress >= 1 ? 'Hit' : s.onTrack ? 'On track' : 'Behind'}</span>}
         </div>
       )}
+      <MeasureModel m={m} />
 
       <div className="mcard-chart">
         <MeasureChart m={m} logs={m.logs} today={today} />

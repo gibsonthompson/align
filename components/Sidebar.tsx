@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, CalendarDays, ChevronRight, Images, Inbox, NotebookPen, Orbit, Pin, Plug, Search, Sun } from 'lucide-react';
+import { Activity, CalendarDays, ChevronRight, Images, Inbox, NotebookPen, Orbit, Pin, Plug, Search, Sun, UserRound } from 'lucide-react';
 import { NODE_KINDS } from '@/lib/kinds';
 import type { NodeType, ObjectRef, Sector } from '@/lib/types';
 import LogoMark from '@/components/LogoMark';
@@ -26,6 +26,7 @@ const NAV = [
   { href: '/calendar', label: 'Calendar', Icon: CalendarDays },
   { href: '/progress', label: 'Progress', Icon: Activity },
   { href: '/vision', label: 'Vision', Icon: Images },
+  { href: '/profile', label: 'Profile', Icon: UserRound },
   { href: '/reviews', label: 'Reviews', Icon: NotebookPen },
   { href: '/connections', label: 'Connections', Icon: Plug },
 ];

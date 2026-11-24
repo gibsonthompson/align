@@ -2,11 +2,12 @@ import 'server-only';
 import { db } from '@/lib/db';
 import { addDaysISO, mondayOf, todayISO } from '@/lib/format';
 import { utcToZoned, zonedToUtc } from '@/lib/tz';
-import { habitStat, measureStat, plannedDays, type HabitStat, type MeasureStat } from '@/lib/habits';
+import { habitStat, measureModel, measureStat, plannedDays, type HabitStat, type MeasureModel, type MeasureStat } from '@/lib/habits';
 import type { Habit, HabitLog, Measure, MeasureLog, NodeStatus, NodeType } from '@/lib/types';
 
 export const HABIT_COLS = 'id, node_id, schedule, days, per_week, minutes, window_start, window_end, auto_place, paused, started_on';
-export const MEASURE_COLS = 'id, node_id, sector_id, name, unit, kind, direction, period, start_value, target_value, target_date, archived, sort, created_at';
+export const MEASURE_COLS =
+  'id, node_id, sector_id, name, unit, kind, direction, period, start_value, target_value, target_date, archived, sort, created_at, baseline_date, curve, assumptions, scenarios, method';
 
 export interface HabitRow extends Habit {
   node: { id: string; title: string; type: NodeType; status: NodeStatus; sector_id: string | null; archived: boolean };
@@ -18,6 +19,7 @@ export interface MeasureRow extends Measure {
   node: { id: string; title: string } | null;
   logs: MeasureLog[];
   stat: MeasureStat;
+  model: MeasureModel | null;
 }
 
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
@@ -70,7 +72,8 @@ async function measuresWith(nodeId?: string): Promise<MeasureRow[]> {
   for (const l of (logs.data ?? []) as MeasureLog[]) logMap.set(l.measure_id, [...(logMap.get(l.measure_id) ?? []), { ...l, value: Number(l.value) }]);
   return measures.map((m) => {
     const ml = logMap.get(m.id) ?? [];
-    return { ...m, node: m.node_id ? (nodeMap.get(m.node_id) ?? null) : null, logs: ml, stat: measureStat(m, ml, today) };
+    const modelled = m.kind === 'level' || m.period === 'all';
+    return { ...m, node: m.node_id ? (nodeMap.get(m.node_id) ?? null) : null, logs: ml, stat: measureStat(m, ml, today), model: modelled ? measureModel(m, ml, today) : null };
   });
 }
 

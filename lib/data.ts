@@ -3,13 +3,14 @@ import { db } from '@/lib/db';
 import { requireSession } from '@/lib/auth';
 import { addDaysISO, todayISO } from '@/lib/format';
 import { zonedToUtc } from '@/lib/tz';
-import type { Activity, AlignNode, Block, BrainMessage, ChildRow, Crumb, Fact, LinkRow, Note, ObjectRef, ObjectType, Sector } from '@/lib/types';
+import type { Activity, AlignNode, Block, BrainMessage, ChildRow, Crumb, Fact, LinkRow, Note, ObjectRef, ObjectType, Sector, Review } from '@/lib/types';
+import { REVIEW_COLS } from '@/lib/review';
 import { brainConfigured, brainModel } from '@/lib/brain';
 
 const SECTOR_COLS =
-  'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at';
+  'id, slug, name, parent_id, colour, icon, summary, importance, satisfaction, attention_needed, mode, sort, archived, created_at, updated_at, current_state, desired_state, weekly_hours, monthly_budget';
 const NODE_COLS =
-  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state, event_date, link_url, location, cost';
+  'id, type, title, body, sector_id, parent_id, status, priority, start_date, due_date, done_at, sort, archived, created_at, updated_at, done_criteria, effort_minutes, cadence, actionable, brain_state, event_date, link_url, location, cost, rationale, hypothesis, success_criteria, review_date, verdict, verdict_note';
 const OBJECT_COLS = 'object_type, id, title, kind, sector_id, status, slug';
 
 function fail(what: string, error: { message: string } | null): never {
@@ -128,6 +129,7 @@ export interface NodePage {
   allSectors: Sector[];
   brain: BrainData;
   blocks: Block[];
+  reviews: Review[];
 }
 
 export async function getNodePage(id: string): Promise<NodePage | null> {
@@ -137,7 +139,7 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
   if (!node) return null;
   const n = node as AlignNode;
 
-  const [path, children, links, notes, activity, pinned, allSectors, brain, blocks] = await Promise.all([
+  const [path, children, links, notes, activity, pinned, allSectors, brain, blocks, reviews] = await Promise.all([
     db().rpc('align_node_path', { p_id: n.id }),
     db().rpc('align_children', { p_parent: n.id }),
     getLinks('node', n.id),
@@ -152,6 +154,7 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
       .eq('node_id', n.id)
       .order('start_at', { ascending: false })
       .limit(60),
+    db().from('align_reviews').select(REVIEW_COLS).eq('node_id', n.id).order('created_at', { ascending: false }).limit(30),
   ]);
   if (path.error) fail('the path', path.error);
   if (children.error) fail('the pages under this one', children.error);
@@ -168,6 +171,7 @@ export async function getNodePage(id: string): Promise<NodePage | null> {
     allSectors,
     brain,
     blocks: (blocks.data ?? []) as Block[],
+    reviews: (reviews.data ?? []).map((r) => ({ ...(r as Review), execution: r.execution === null ? null : Number(r.execution) })),
   };
 }
 

@@ -221,6 +221,18 @@ export default function BrainPanel({
                   {reply.gap}
                 </p>
               )}
+              {reply?.critique?.trim() && (
+                <p className="brain-gap brain-critique" style={{ marginTop: 8 }}>
+                  <span className="tag">Challenge</span>
+                  {reply.critique}
+                </p>
+              )}
+              {reply?.capacity_note?.trim() && (
+                <p className="brain-gap" style={{ marginTop: 8 }}>
+                  <span className="tag">Capacity</span>
+                  {reply.capacity_note}
+                </p>
+              )}
             </div>
 
             {open && (reply?.questions?.length ?? 0) > 0 && (
@@ -460,6 +472,10 @@ function ProposalCard({ p, draft, editable, onChange }: { p: BrainProposal; draf
           maxLength={300}
         />
         {p.body && <p className="pc-body">{p.body}</p>}
+        {p.rationale && <p className="pc-body">Why it should work: {p.rationale}</p>}
+        {p.hypothesis && <p className="pc-body">Hypothesis: {p.hypothesis}</p>}
+        {p.success_criteria && <p className="pc-body">Judged by: {p.success_criteria}</p>}
+        {p.review_date && <p className="pc-body">Review on {shortDate(p.review_date)}</p>}
         <div className={`pc-grid${p.type === 'commitment' ? ' three' : ''}`}>
           <label className="pc-field">
             <span>Done when</span>
