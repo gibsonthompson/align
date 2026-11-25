@@ -114,7 +114,7 @@ export default function IdealWeek({
                       onClick={() => setEdit({ index: i, slot: { ...s } })}
                     >
                       <b>{s.label || 'Untitled'}</b>
-                      {s.end - s.start >= 90 && <span>{`${clock(s.start, true)} to ${clock(s.end, true)}`}</span>}
+                      {s.end - s.start >= 90 && <span>{`${clock(s.start)} to ${clock(s.end)}`}</span>}
                     </button>
                   ) : null,
                 )}

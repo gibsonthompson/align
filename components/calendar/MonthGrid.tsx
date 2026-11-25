@@ -5,6 +5,7 @@ import BlockHover from '@/components/calendar/BlockHover';
 import Link from 'next/link';
 import { Clock3, Flag } from 'lucide-react';
 import { clock } from '@/lib/tz';
+import { titleCase } from '@/lib/format';
 import type { CalendarNode } from '@/lib/calendar';
 import type { SectorLookup } from '@/components/ObjectRow';
 import { blockTitle, dayNum, DRAG_MIME, type CalBlock, type DragPage } from '@/components/calendar/shared';
@@ -90,7 +91,7 @@ export default function MonthGrid({
                   }}
                 >
                   <i className="swatch" aria-hidden />
-                  <span className="mono mg-time">{clock(b.s, true)}</span>
+                  <span className="mono mg-time">{clock(b.s)}</span>
                   <span className="mg-title">{blockTitle(b)}</span>
                 </button>
               ),
@@ -108,7 +109,7 @@ export default function MonthGrid({
                   title={`${n.title}${n.part_of ? ` · ${n.part_of}` : ''}`}
                 >
                   {n.scheduled ? <Clock3 size={10} /> : <i className="ring" aria-hidden />}
-                  <span className="mg-title">{n.title}</span>
+                  <span className="mg-title">{titleCase(n.title)}</span>
                 </Link>
               ),
             })),
@@ -182,7 +183,7 @@ function EventItem({ n, colour }: { n: CalendarNode; colour: string }) {
   return (
     <Link href={`/n/${n.id}`} className="mg-item event" style={{ ['--c' as string]: colour }} onClick={(e) => e.stopPropagation()} title={`${n.title}${n.location ? ` · ${n.location}` : ''}`}>
       <Flag size={10} />
-      <span className="mg-title">{n.title}</span>
+      <span className="mg-title">{titleCase(n.title)}</span>
     </Link>
   );
 }

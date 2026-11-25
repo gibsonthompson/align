@@ -197,7 +197,7 @@ export default function HabitPanel({ nodeId, habit, cadence, today, archived }: 
           Habit <span className="tag">{scheduleLabel(habit)}</span>
           {habit.window_start !== null && (
             <span className="tag">
-              {clock(habit.window_start, true)} to {clock(habit.window_end ?? 1440, true)}
+              {clock(habit.window_start)} to {clock(habit.window_end ?? 1440)}
             </span>
           )}
           {habit.paused && <span className="tag">Paused</span>}

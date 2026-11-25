@@ -30,7 +30,8 @@
   --safe-t: env(safe-area-inset-top, 0px);
 
   --font: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* Numbers, times and small labels use the same face as the text, with even-width digits. */
+  --mono: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
 
@@ -49,6 +50,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
+  font-variant-numeric: tabular-nums;
   font-size: 14px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -109,7 +111,7 @@ textarea {
 
 .mono {
   font-family: var(--mono);
-  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
 }
 
 .muted {
@@ -2840,7 +2842,11 @@ a.stat:hover {
 
 .blk-text {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 1px;
   min-width: 0;
 }
 
@@ -2856,9 +2862,9 @@ a.stat:hover {
 }
 
 .blk-time {
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--text-2);
-  margin-top: 1px;
   white-space: nowrap;
 }
 
@@ -3571,7 +3577,21 @@ a.stat:hover {
   text-overflow: ellipsis;
 }
 
-@container (max-width: 96px) {
+/* Narrow blocks (the week view) wrap the full time under the title instead of hiding it. */
+@container (max-width: 220px) {
+  .blk[data-roomy='true'] .blk-time {
+    white-space: normal;
+    line-height: 1.3;
+  }
+  .blk:not([data-roomy='true']) .blk-time {
+    display: none;
+  }
+  .blk[data-short='true'] .blk-title {
+    flex: 1 1 100%;
+  }
+}
+
+@container (max-width: 64px) {
   .blk-check,
   .blk-time {
     display: none;

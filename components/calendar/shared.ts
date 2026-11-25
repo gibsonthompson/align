@@ -1,4 +1,4 @@
-import { addDaysISO } from '@/lib/format';
+import { addDaysISO, titleCase } from '@/lib/format';
 import { utcToZoned } from '@/lib/tz';
 import type { Block, BlockStatus } from '@/lib/types';
 
@@ -66,7 +66,7 @@ export function wallTime(b: Pick<Block, 'start_at' | 'end_at'>): { date: string;
 }
 
 export function blockTitle(b: Pick<Block, 'title' | 'node'>): string {
-  return b.title?.trim() || b.node?.title || 'Untitled';
+  return titleCase(b.title?.trim() || b.node?.title || 'Untitled');
 }
 
 // Side-by-side layout for overlapping blocks within one day.

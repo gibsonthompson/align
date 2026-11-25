@@ -1,7 +1,7 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import { isId, cleanBody, cleanLink, cleanText, slugify } from '@/lib/ids';
-import { isISODate, todayISO, addDaysISO } from '@/lib/format';
+import { isISODate, todayISO, addDaysISO, titleCase } from '@/lib/format';
 import { NODE_KINDS, PERIOD_TYPES } from '@/lib/kinds';
 import { hhmm, parseClock, TZ, utcToZoned, zonedToUtc } from '@/lib/tz';
 import { getHabits, getMeasures, placeHabitSessions, type HabitRow, type MeasureRow } from '@/lib/progress';
@@ -1252,7 +1252,7 @@ function blockOut(b: BlockRow & { page_title?: string; page_type?: NodeType; sec
   const minutes = Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000);
   return {
     id: b.id,
-    title: b.title || b.page_title || 'Untitled',
+    title: titleCase(b.title || b.page_title || 'Untitled'),
     date: a.date,
     start: hhmm(a.minutes),
     end: z.date === a.date ? hhmm(z.minutes) : `${z.date} ${hhmm(z.minutes)}`,
@@ -1370,7 +1370,7 @@ async function scheduleBlocks(a: Args, ctx: Ctx) {
     const span = blockSpan(b, label);
     const node = b.page_id ? pageMap.get(b.page_id as string) : undefined;
     if (b.page_id && (!node || node.archived)) throw new ToolError(`${label}: no page with id ${String(b.page_id)}.`);
-    const title = str(b.title, 300, 'title') ?? '';
+    const title = titleCase(str(b.title, 300, 'title') ?? '');
     if (!node && !title) throw new ToolError(`${label}: give a page_id or a title.`);
     rows.push({
       node_id: node?.id ?? null,
@@ -1445,7 +1445,7 @@ async function updateBlockTool(a: Args, ctx: Ctx) {
     row.start_at = zonedToUtc(span.date, span.s).toISOString();
     row.end_at = zonedToUtc(span.date, span.e).toISOString();
   }
-  if (a.title !== undefined) row.title = str(a.title, 300, 'title') ?? '';
+  if (a.title !== undefined) row.title = titleCase(str(a.title, 300, 'title') ?? '');
   if (a.notes !== undefined) row.notes = str(a.notes, 5000, 'notes') ?? '';
   if (a.status !== undefined) {
     if (!['planned', 'done', 'skipped'].includes(a.status as string)) throw new ToolError('status is planned, done or skipped.');

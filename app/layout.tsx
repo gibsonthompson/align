@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import '@fontsource-variable/inter';
-import '@fontsource-variable/jetbrains-mono';
 import './globals.css';
 import UpdateChecker from '@/components/UpdateChecker';
 

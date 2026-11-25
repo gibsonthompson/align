@@ -37,12 +37,18 @@ export default function Sheet({
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const requestClose = useCallback(() => onClose(), [onClose]);
+  // The latest onClose, without making the effects below re-run on every render
+  // (they would pull focus back to the first field mid-typing).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const requestClose = useCallback(() => closeRef.current(), []);
 
+  // Runs once each time the sheet opens: Escape to close, page scroll locked,
+  // and the first field focused. Never again while it stays open.
   useEffect(() => {
     if (!mounted) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') requestClose();
+      if (e.key === 'Escape') closeRef.current();
     };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
@@ -57,7 +63,7 @@ export default function Sheet({
       document.body.style.overflow = prev;
       window.clearTimeout(t);
     };
-  }, [mounted, requestClose]);
+  }, [mounted]);
 
   if (!mounted || typeof document === 'undefined') return null;
 

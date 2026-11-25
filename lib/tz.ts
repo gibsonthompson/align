@@ -56,7 +56,8 @@ export function clock(minutes: number, compact = false): string {
   const mm = m % 60;
   const h12 = h % 12 === 0 ? 12 : h % 12;
   const ap = h < 12 ? 'AM' : 'PM';
-  if (compact) return mm ? `${h12}:${String(mm).padStart(2, '0')}${ap === 'AM' ? 'a' : 'p'}` : `${h12}${ap === 'AM' ? 'a' : 'p'}`;
+  // Compact drops ":00" on the hour, nothing else: "6 AM", "6:30 AM".
+  if (compact) return mm ? `${h12}:${String(mm).padStart(2, '0')} ${ap}` : `${h12} ${ap}`;
   return `${h12}:${String(mm).padStart(2, '0')} ${ap}`;
 }
 

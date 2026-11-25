@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { CalendarDays, CalendarPlus, CalendarRange, ChevronLeft, ChevronRight, GripVertical, ListChecks, PieChart } from 'lucide-react';
-import { addDaysISO, dueLabel, mondayOf, spanLabel } from '@/lib/format';
+import { addDaysISO, dueLabel, mondayOf, spanLabel, titleCase } from '@/lib/format';
 import { duration } from '@/lib/tz';
 import type { CalendarNode } from '@/lib/calendar';
 import type { Sector } from '@/lib/types';
@@ -98,7 +98,7 @@ export default function CalendarSide({
                   <GripVertical size={13} className="ts-grip" aria-hidden />
                   <div className="ts-main">
                     <Link href={`/n/${n.id}`} className="ts-title" draggable={false}>
-                      {n.title}
+                      {titleCase(n.title)}
                     </Link>
                     <span className="ts-sub">
                       <i className="swatch" aria-hidden />

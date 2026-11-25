@@ -4,7 +4,7 @@ import { getToday } from '@/lib/data';
 import { getHabits } from '@/lib/progress';
 import HabitItem from '@/components/progress/HabitItem';
 import { sectorLookup } from '@/lib/sectors';
-import { countdown, dueLabel, greeting, longToday, money, shortDate, spanLabel, todayISO } from '@/lib/format';
+import { countdown, dueLabel, greeting, longToday, money, shortDate, spanLabel, titleCase, todayISO } from '@/lib/format';
 import { clock, utcToZoned } from '@/lib/tz';
 import type { AlignNode, ObjectRef } from '@/lib/types';
 import TopBar from '@/components/TopBar';
@@ -187,11 +187,11 @@ export default async function TodayPage() {
                       return (
                         <Link key={b.id} href={b.node_id ? `/n/${b.node_id}` : '/calendar?view=day'} className="sched-row" data-status={b.status} data-now={live} style={{ ['--c' as string]: colour }}>
                           <span className="sched-time">
-                            {clock(a.minutes, true)} to {clock(z.minutes, true)}
+                            {clock(a.minutes)} to {clock(z.minutes)}
                           </span>
                           <span className="sched-title">
                             <i className="swatch" aria-hidden />
-                            <span>{b.title || b.node?.title || 'Untitled'}</span>
+                            <span>{titleCase(b.title || b.node?.title || 'Untitled')}</span>
                           </span>
                           {b.status === 'done' ? <span className="tag good">Done</span> : live ? <span className="tag soon">Now</span> : <span />}
                         </Link>

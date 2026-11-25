@@ -328,7 +328,7 @@ export default function TimeGrid(props: TimeGridProps) {
                 <button key={`o:${b.id}`} type="button" className="chip" style={{ ['--c' as string]: b.sector_id ? (lookup[b.sector_id]?.colour ?? '#8a8a8a') : '#8a8a8a' }} onClick={() => props.onOpen(b)} title="Outside 5 AM to 11 PM">
                   <i className="swatch" aria-hidden />
                   <span className="mono" style={{ color: 'var(--text-3)', flex: 'none' }}>
-                    {clock(b.s, true)}
+                    {clock(b.s)}
                   </span>
                   <span>{blockTitle(b)}</span>
                 </button>
@@ -350,7 +350,7 @@ export default function TimeGrid(props: TimeGridProps) {
               const h = VIEW_START / 60 + i;
               return (
                 <div key={h} className="tg-hour" style={{ top: px(h * 60) }}>
-                  <span className={i === 0 ? 'tg-first' : undefined}>{clock(h * 60, true).replace(/a$/, ' AM').replace(/p$/, ' PM')}</span>
+                  <span className={i === 0 ? 'tg-first' : undefined}>{clock(h * 60, true)}</span>
                   {quarterLabels &&
                     [15, 30, 45].map((q) => (
                       <span key={q} className="tg-quarter" style={{ top: len(q) }}>
@@ -403,6 +403,7 @@ export default function TimeGrid(props: TimeGridProps) {
                         data-status={b.status}
                         data-ghosted={moving}
                         data-short={h < 26}
+                        data-roomy={h >= 50}
                         data-tiny={h < 15}
                         data-busy={busyIds.has(b.id)}
                         style={{
@@ -445,7 +446,7 @@ export default function TimeGrid(props: TimeGridProps) {
                         <div className="blk-text">
                           <span className="blk-title">{blockTitle(b)}</span>
                           <span className="blk-time mono">
-                            {clock(b.s, true)} to {clock(b.e, true)}
+                            {clock(b.s)} to {clock(b.e)}
                           </span>
                         </div>
                         {/* Short blocks are all handle otherwise; resize those from the editor. */}
@@ -460,7 +461,7 @@ export default function TimeGrid(props: TimeGridProps) {
                           {preview.id ? blockTitle(blocks.find((b) => b.id === preview.id) ?? { title: '', node: null }) : 'New block'}
                         </span>
                         <span className="blk-time mono">
-                          {clock(preview.s, true)} to {clock(preview.e, true)} · {duration(preview.e - preview.s)}
+                          {clock(preview.s)} to {clock(preview.e)} · {duration(preview.e - preview.s)}
                         </span>
                       </div>
                     </div>
@@ -470,7 +471,7 @@ export default function TimeGrid(props: TimeGridProps) {
                       <div className="blk-text">
                         <span className="blk-title">{dragPage?.title ?? 'Drop to schedule'}</span>
                         <span className="blk-time mono">
-                          {clock(dropAt.s, true)} to {clock(dropAt.e, true)}
+                          {clock(dropAt.s)} to {clock(dropAt.e)}
                         </span>
                       </div>
                     </div>

@@ -9,7 +9,7 @@ import { hasSession } from '@/lib/auth';
 import { missingEnvNames } from '@/lib/env';
 import { createSession, SESSION_COOKIE, sessionCookieOptions } from '@/lib/session';
 import { cleanBody, cleanLink, cleanText, isId, slugify } from '@/lib/ids';
-import { addDaysISO, isISODate, todayISO } from '@/lib/format';
+import { addDaysISO, isISODate, titleCase, todayISO } from '@/lib/format';
 import { placeHabitSessions, type PlaceResult } from '@/lib/progress';
 import { guessSector, type SectorGuess } from '@/lib/classify';
 import { zonedToUtc } from '@/lib/tz';
@@ -730,7 +730,7 @@ export async function createBlock(input: {
   const times = blockTimes(input.date, input.start, input.end);
   if (typeof times === 'string') return err(times);
   const nodeId = input.nodeId && isId(input.nodeId) ? input.nodeId : null;
-  const title = cleanText(input.title ?? '', 300);
+  const title = titleCase(cleanText(input.title ?? '', 300));
   if (!nodeId && !title) return err('Give it a title or link it to a page.');
   if (nodeId) {
     const { data: node } = await db().from('align_nodes').select('id, archived').eq('id', nodeId).maybeSingle();
@@ -764,7 +764,7 @@ export async function updateBlock(
   if (!(await hasSession())) return err(SIGNED_OUT);
   if (!isId(id)) return err('That block is gone. Reload the calendar.');
   const row: Record<string, unknown> = {};
-  if (patch.title !== undefined) row.title = cleanText(patch.title, 300);
+  if (patch.title !== undefined) row.title = titleCase(cleanText(patch.title, 300));
   if (patch.notes !== undefined) row.notes = cleanBody(patch.notes, 5000);
   if (patch.nodeId !== undefined) {
     if (patch.nodeId === null) row.node_id = null;
@@ -805,7 +805,7 @@ export async function updateBlock(
     const { data: cur } = await db().from('align_blocks').select('title, node_id').eq('id', id).maybeSingle();
     if (cur && !cur.title) {
       const { data: n } = cur.node_id ? await db().from('align_nodes').select('title').eq('id', cur.node_id).maybeSingle() : { data: null };
-      row.title = (n?.title as string | undefined) ?? 'Untitled';
+      row.title = titleCase((n?.title as string | undefined) ?? 'Untitled');
     }
   }
   if (row.title === '' && row.node_id === undefined) {

@@ -110,3 +110,31 @@ export function hostOf(url: string): string {
     return url;
   }
 }
+
+// Title Case for anything on the calendar: "finish the screen recording app"
+// becomes "Finish the Screen Recording App". Small words stay lowercase unless
+// they start or end the title or follow a colon; words that already carry their
+// own capitals (VoiceAI, iPhone, GTC), numbers, links and emails are left alone.
+const SMALL_WORDS = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'nor', 'for', 'so', 'yet', 'as', 'at', 'by', 'in', 'of', 'on', 'per', 'to', 'via', 'vs', 'vs.']);
+
+function capWord(w: string, force: boolean): string {
+  const m = /^([^A-Za-z0-9]*)(.*?)([^A-Za-z0-9]*)$/.exec(w);
+  if (!m || !m[2]) return w;
+  const [, pre, core, post] = m;
+  if (/[@/]|\.[a-z]{2,}/i.test(core)) return w; // emails, links, file names
+  if (/[A-Z]/.test(core.slice(1)) || /\d/.test(core)) return w; // VoiceAI, iPhone, GTC, 5K
+  const lower = core.toLowerCase();
+  if (!force && SMALL_WORDS.has(lower)) return pre + lower + post;
+  return pre + lower.split('-').map((p) => (p ? p[0].toUpperCase() + p.slice(1) : p)).join('-') + post;
+}
+
+export function titleCase(text: string): string {
+  const words = text.trim().split(/\s+/);
+  if (!words[0]) return text.trim();
+  return words
+    .map((w, i) => {
+      const force = i === 0 || i === words.length - 1 || /[:.!?]$/.test(words[i - 1] ?? '');
+      return capWord(w, force);
+    })
+    .join(' ');
+}
